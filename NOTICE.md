@@ -1,6 +1,6 @@
 # Upstream software
 
-This product includes software developed by Dortania and OpenCore Legacy Patcher contributors when the user builds a kit from the official assets.
+OCLP Tahoe USB Preparation for MacBookPro11,3 obtains official packages developed by Dortania and OpenCore Legacy Patcher contributors. Its optional experimental Recovery kit extracts additional runtime resources from those packages.
 
 OCLP, OpenCore and their payloads are not distributed in this source repository. The preparation tool obtains or accepts the pinned official packages and stages them locally. Upstream copyrights and licenses continue to apply to those components; the MIT license here covers only this project's original custom code and documentation.
 

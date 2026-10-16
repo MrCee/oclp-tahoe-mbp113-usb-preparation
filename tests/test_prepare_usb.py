@@ -54,6 +54,7 @@ class UsbFixtures:
         self.stack.enter_context(patch.object(fix_efi, 'disk_info', side_effect=self.disk_info))
         self.stack.enter_context(patch.object(fix_efi.os.path, 'ismount', side_effect=lambda p: Path(p) in (self.usb, self.efi)))
         self.stack.enter_context(patch.object(prepare, 'find_config', return_value=self.config))
+        self.stack.enter_context(patch.object(prepare, 'check_build_tools'))
         def native_run(args, **kwargs):
             with patch.object(subprocess, 'Popen', REAL_POPEN):
                 return subprocess.run([str(a) for a in args], check=True, **kwargs)
@@ -107,7 +108,7 @@ class UsbFixtures:
 
 
 
-class AllInOneTests(UsbFixtures, unittest.TestCase):
+class RecoveryKitPreparationTests(UsbFixtures, unittest.TestCase):
     def test_fresh_usb_download_build_deploy_efi_permissions_and_logs(self):
         old_boot = (self.efi / 'EFI/BOOT/BOOTx64.efi').read_bytes()
         self.run_prepare()
@@ -199,7 +200,7 @@ class AllInOneTests(UsbFixtures, unittest.TestCase):
     def test_symlink_destination_blocks_deployment_and_preserves_external_file(self):
         outside = self.root / 'outside'; outside.write_bytes(b'preserve')
         (self.usb / 'repair.sh').symlink_to(outside)
-        with self.assertRaisesRegex(ValueError, 'symlinked'): self.run_prepare()
+        with self.assertRaisesRegex(ValueError, 'symlink'): self.run_prepare()
         self.assertEqual(outside.read_bytes(), b'preserve')
         self.assertEqual(plistlib.loads(self.config.read_bytes()), self.original)
 
@@ -261,6 +262,128 @@ class InstallerOnlyTests(UsbFixtures, unittest.TestCase):
             def __exit__(self, *args): return False
             def wait(self): return 0
         return Process()
+
+    def test_writable_efi_is_not_remounted(self):
+        with patch.object(prepare.subprocess, 'run') as command:
+            self.assertEqual(prepare.ensure_writable_efi(self.usb, self.config), self.config)
+        command.assert_not_called()
+
+    def test_readonly_efi_is_remounted_without_force_and_preserves_config(self):
+        mounted_writable = False
+        def info(path):
+            result = self.disk_info(path)
+            if Path(path) != self.usb:
+                result.update(DeviceIdentifier='disk99s1', WritableVolume=mounted_writable,
+                              WritableMedia=True, DiskUUID='33333333-2222-4333-8444-555555555555')
+            return result
+        def mount(command, **kwargs):
+            nonlocal mounted_writable
+            if command[1] == 'mount': mounted_writable = True
+        before = self.config.read_bytes()
+        with patch.object(builder, 'disk_info', side_effect=info), patch.object(prepare.subprocess, 'run', side_effect=mount) as command:
+            self.assertEqual(prepare.ensure_writable_efi(self.usb, self.config), self.config)
+        self.assertEqual([c.args[0] for c in command.call_args_list],
+                         [['/usr/sbin/diskutil', 'unmount', 'disk99s1'], ['/usr/sbin/diskutil', 'mount', 'disk99s1']])
+        self.assertEqual(self.config.read_bytes(), before)
+
+    def test_busy_efi_remount_stops_without_force_or_replacement(self):
+        def info(path):
+            result = self.disk_info(path)
+            result.update(DeviceIdentifier='disk99s1', WritableVolume=False, WritableMedia=True)
+            return result
+        failure = subprocess.CalledProcessError(1, ['/usr/sbin/diskutil', 'unmount', 'disk99s1'], stderr='busy')
+        with patch.object(builder, 'disk_info', side_effect=info), patch.object(prepare.subprocess, 'run', side_effect=failure) as command:
+            with self.assertRaises(subprocess.CalledProcessError): prepare.ensure_writable_efi(self.usb, self.config)
+        command.assert_called_once()
+        self.assertNotIn('force', command.call_args.args[0])
+        self.assertIn('sudo', ' '.join(prepare.next_actions(failure)))
+
+    def test_changed_efi_identity_stops_after_remount(self):
+        writable = False
+        def info(path):
+            result = self.disk_info(path)
+            result.update(DeviceIdentifier='disk99s1', WritableVolume=writable, WritableMedia=True,
+                          DiskUUID='new-id' if writable else 'original-id')
+            return result
+        def mount(command, **kwargs):
+            nonlocal writable
+            if command[1] == 'mount': writable = True
+        with patch.object(builder, 'disk_info', side_effect=info), patch.object(prepare.subprocess, 'run', side_effect=mount):
+            with self.assertRaisesRegex(ValueError, 'identity changed'): prepare.ensure_writable_efi(self.usb, self.config)
+        self.assertEqual(plistlib.loads(self.config.read_bytes()), self.original)
+
+    def test_write_probe_failure_records_next_step_before_downloads(self):
+        with patch.object(prepare, 'check_write_access', side_effect=PermissionError(13, 'permission denied')):
+            with self.assertRaises(PermissionError): self.run_prepare()
+        self.child.assert_not_called()
+        report = json.loads(next((self.usb / 'Repair-Logs').rglob('report.json')).read_text())
+        self.assertEqual((report['status'], report['phase']), ('incomplete', 'preflight'))
+        self.assertIn('sudo', ' '.join(report['next_steps']))
+        self.assertEqual(plistlib.loads(self.config.read_bytes()), self.original)
+
+    def test_write_probes_are_cleaned_up(self):
+        before = (self.snapshot(self.usb), self.snapshot(self.efi))
+        prepare.check_write_access(self.usb, self.config)
+        self.assertEqual(before, (self.snapshot(self.usb), self.snapshot(self.efi)))
+
+    def test_boot_error_next_step_does_not_require_recreating_installer(self):
+        advice = prepare.next_actions(ValueError('No supported OCLP bootstrap'))
+        self.assertIn('Build and Install OpenCore', advice[0])
+        self.assertIn('Do not recreate', advice[1])
+
+
+    def apple_bootstrap(self):
+        path = self.efi / 'System/Library/CoreServices/boot.efi'
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b'Apple bootstrap fixture')
+        return path
+
+    def test_apple_layout_prepares_without_creating_uefi_fallback(self):
+        apple = self.apple_bootstrap()
+        (self.efi / 'EFI/BOOT/BOOTx64.efi').unlink()
+        self.run_prepare()
+        prepare.audit(self.usb, self.partition, self.config)
+        self.assertEqual(apple.read_bytes(), b'Apple bootstrap fixture')
+        self.assertFalse((self.efi / 'EFI/BOOT/BOOTx64.efi').exists())
+        report = json.loads(next((self.usb / 'Repair-Logs').rglob('report.json')).read_text())
+        self.assertEqual(report['boot_layout'], 'Apple')
+
+    def test_both_bootstrap_layouts_are_accepted(self):
+        self.apple_bootstrap()
+        self.assertEqual(prepare.check_boot_files(self.config), 'Apple + UEFI')
+
+    def test_no_bootstrap_stops_before_downloads_or_usb_writes(self):
+        (self.efi / 'EFI/BOOT/BOOTx64.efi').unlink()
+        before = self.snapshot(self.usb)
+        with self.assertRaisesRegex(ValueError, 'No supported OCLP bootstrap'):
+            self.run_prepare()
+        self.child.assert_not_called()
+        self.assertEqual(self.snapshot(self.usb), before)
+        self.assertEqual(plistlib.loads(self.config.read_bytes()), self.original)
+
+    def test_empty_apple_bootstrap_is_not_accepted(self):
+        self.apple_bootstrap().write_bytes(b'')
+        (self.efi / 'EFI/BOOT/BOOTx64.efi').unlink()
+        with self.assertRaisesRegex(ValueError, 'No supported OCLP bootstrap'):
+            self.run_prepare()
+        self.child.assert_not_called()
+
+    def test_symlinked_apple_bootstrap_is_rejected(self):
+        path = self.apple_bootstrap(); path.unlink()
+        outside = self.root / 'outside-loader'; outside.write_bytes(b'preserve')
+        path.symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, 'symlink'):
+            self.run_prepare()
+        self.child.assert_not_called()
+        self.assertEqual(outside.read_bytes(), b'preserve')
+
+    def test_apple_bootstrap_still_requires_opencore_binary(self):
+        self.apple_bootstrap()
+        (self.efi / 'EFI/OC/OpenCore.efi').unlink()
+        with self.assertRaisesRegex(ValueError, 'Missing OpenCore boot file: OC/OpenCore.efi'):
+            self.run_prepare()
+        self.child.assert_not_called()
+
 
     def test_default_prepares_packages_and_efi_without_any_recovery_files(self):
         self.run_prepare()
@@ -349,6 +472,19 @@ class InstallerOnlyTests(UsbFixtures, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'exactly the two pinned'):
             builder.deploy(output, self.usb, backup_dir=self.host / 'backups', recovery_kit=False)
         self.assertFalse((self.usb / 'Library').exists())
+
+
+class PrerequisiteTests(unittest.TestCase):
+    def test_default_does_not_need_compiler(self):
+        with patch.object(prepare.subprocess, 'run') as command:
+            prepare.check_build_tools(False)
+        command.assert_not_called()
+
+    def test_optional_compiler_missing_gives_specific_next_step(self):
+        import types
+        with patch.object(prepare.subprocess, 'run', return_value=types.SimpleNamespace(returncode=1)):
+            with self.assertRaisesRegex(ValueError, 'xcode-select --install'):
+                prepare.check_build_tools(True)
 
 
 class EfiDiscoveryTests(unittest.TestCase):

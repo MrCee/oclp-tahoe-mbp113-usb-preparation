@@ -1,4 +1,6 @@
-# Optional Recovery fallback
+# Experimental Recovery fallback
+
+**Status:** this custom helper was not demonstrated to recover the earlier installation by itself. The normal USB preparation route does not use it.
 
 Prepare the optional files on the working Mac **before** using the Recovery commands below:
 

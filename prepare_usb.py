@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Prepare or repair the supported USB in one command; never erase/install macOS."""
+"""Prepare a verified Tahoe installer USB for MacBookPro11,3; never erase/install macOS."""
 import argparse
 import datetime
 import json
+import os
+import tempfile
 from pathlib import Path, PurePosixPath
 import plistlib
 import re
@@ -61,10 +63,25 @@ def find_config(usb, read_only=False):
 
 def check_boot_files(config_path):
     efi = config_path.parents[1]
-    for relative in ['BOOT/BOOTx64.efi', 'OC/OpenCore.efi']:
-        path = safe_path(efi, relative)
-        if not path.is_file() or not path.stat().st_size:
-            raise ValueError('Missing OpenCore boot file: ' + relative)
+    core = safe_path(efi, 'OC/OpenCore.efi')
+    if not core.is_file() or not core.stat().st_size:
+        raise ValueError('Missing OpenCore boot file: OC/OpenCore.efi. '
+                         'Use OCLP Build and Install OpenCore for MacBookPro11,3 on this USB EFI, then rerun.')
+    # RC3 normally installs the Apple bootstrap on genuine Macs. Its optional
+    # boot_efi setting moves that file into the standard UEFI fallback path.
+    # Both are supported; never invent/copy a second loader to satisfy a check.
+    layouts = []
+    for label, root, relative in [
+        ('Apple', config_path.parents[2], 'System/Library/CoreServices/boot.efi'),
+        ('UEFI', efi, 'BOOT/BOOTx64.efi'),
+    ]:
+        path = safe_path(root, relative)
+        if path.is_file() and path.stat().st_size:
+            layouts.append(label)
+    if not layouts:
+        raise ValueError('No supported OCLP bootstrap found on this USB EFI: expected '
+                         'System/Library/CoreServices/boot.efi or EFI/BOOT/BOOTx64.efi. '
+                         'Use OCLP Build and Install OpenCore for MacBookPro11,3 on this USB EFI, then rerun.')
     config = plistlib.loads(config_path.read_bytes())
     for section, folder in [('ACPI', 'ACPI'), ('UEFI', 'Drivers')]:
         key = 'Drivers' if section == 'UEFI' else 'Add'
@@ -84,6 +101,83 @@ def check_boot_files(config_path):
                 path = safe_path(bundle, entry[key])
                 if not path.is_file() or not path.stat().st_size:
                     raise ValueError('Missing enabled kext file: ' + str(path.relative_to(efi)))
+    return ' + '.join(layouts)
+
+
+def ensure_writable_efi(usb, config):
+    """Remount only the already validated same-USB EFI; never force-unmount."""
+    fix_efi.validate_config(usb, config)
+    info = builder.disk_info(config.parents[2])
+    if info.get('WritableVolume') is not False:
+        return config
+    if info.get('WritableMedia') is False:
+        raise ValueError('USB EFI media is read-only; check physical write protection or use a writable USB.')
+    device = info.get('DeviceIdentifier')
+    if not device or not re.fullmatch(r'disk[0-9]+s[0-9]+', device):
+        raise ValueError('Read-only EFI cannot be safely identified for remounting.')
+    original = config.read_bytes()
+    subprocess.run(['/usr/sbin/diskutil', 'unmount', device], check=True, capture_output=True, text=True)
+    subprocess.run(['/usr/sbin/diskutil', 'mount', device], check=True, capture_output=True, text=True)
+    current = builder.disk_info(device)
+    if info.get('DiskUUID') and current.get('DiskUUID') != info['DiskUUID']:
+        raise ValueError('EFI identity changed while remounting; stopping.')
+    mount = current.get('MountPoint')
+    if not mount or current.get('WritableVolume') is False:
+        raise ValueError('USB EFI is still read-only after remounting.')
+    path = fix_efi.validate_config(usb, Path(mount) / 'EFI/OC/config.plist')
+    if path.read_bytes() != original:
+        raise ValueError('EFI config changed while remounting; review it before retrying.')
+    return path
+
+
+def check_write_access(usb, config):
+    # Remove both probes immediately. These test filesystem write access,
+    # including read-only mounts, before downloading or replacing packages.
+    for directory in [usb, safe_path(usb, 'Library'), safe_path(usb, 'Library/Packages'), config.parent]:
+        if not directory.exists():
+            continue
+        probe = None
+        try:
+            fd, probe = tempfile.mkstemp(prefix='.mbp113-preflight-', dir=str(directory))
+            os.close(fd)
+        finally:
+            if probe is not None:
+                os.unlink(probe)
+
+
+def check_build_tools(recovery_kit=False):
+    if sys.version_info < (3, 9):
+        raise ValueError('Python 3.9 or newer is required on the working Mac.')
+    if not recovery_kit:
+        return
+    result = subprocess.run(['/usr/bin/xcrun', '--find', 'clang'], capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError('Optional Recovery kit needs Xcode Command Line Tools: run xcode-select --install.')
+
+
+def next_actions(error):
+    message = str(error).lower()
+    if 'read-only' in message or 'permission' in message or getattr(error, 'errno', None) in (13, 30):
+        return ['Run preparation with sudo and check that the USB is writable. Keep its contents and backups.',
+                'If the EFI is busy, close windows using it and rerun; the tool never force-unmounts a busy volume.']
+    if any(term in message for term in ['bootstrap', 'missing opencore', 'missing enabled', 'built for', 'target model']):
+        return ['Select MacBookPro11,3 in OCLP RC3, Build and Install OpenCore onto this USB EFI, then rerun preparation.',
+                'Do not recreate the macOS installer just to repair an incomplete OpenCore EFI.']
+    if 'installer must be exactly' in message:
+        return ['Use the supported Tahoe 26.7.1 installer, build 25G241. Other builds need separate review.']
+    if 'sha-256' in message or 'checksum' in message:
+        return ['Keep the reported file for inspection and use the exact official package linked in the README.',
+                'Do not bypass checksum verification; rerun with a verified local package or corrected cache.']
+    if 'space' in message:
+        return ['Free space on the volume named in the error, retain backups, and rerun the same command.']
+    if 'xcode' in message or 'clang' in message or 'xcrun' in message:
+        return ['Install Xcode Command Line Tools for --with-recovery-kit, or omit that flag for installer-only preparation.']
+    if 'changed' in message or 'same external usb' in message:
+        return ['Reconnect the intended USB, close other tools modifying its EFI, and rerun the command against its current mount.']
+    if isinstance(error, subprocess.CalledProcessError) and 'diskutil' in str(error.cmd):
+        return ['Close windows using the USB EFI, check its mount in Disk Utility, and rerun with sudo. No force-unmount is attempted.']
+    return ['Read prepare.log for the failed step; retain the saved backups and report.',
+            'Correct the reported cause and rerun the same preparation command. Do not run repair.sh as a substitute for USB preparation.']
 
 
 def verify_installer(usb):
@@ -159,7 +253,7 @@ def main(argv=None):
     parser.add_argument('--usb', required=True, type=Path)
     parser.add_argument('--config', type=Path, help='Optional override; otherwise find/mount this USB EFI automatically')
     parser.add_argument('--check', action='store_true', help='Audit only; no files on USB/EFI are changed')
-    parser.add_argument('--with-recovery-kit', action='store_true', help='Also build the optional Recovery fallback; requires Xcode Command Line Tools')
+    parser.add_argument('--with-recovery-kit', action='store_true', help='Also build the experimental Recovery fallback; requires Xcode Command Line Tools')
     parser.add_argument('--assets-pkg', type=Path)
     parser.add_argument('--kdk-pkg', type=Path)
     parser.add_argument('--cache', type=Path, default=builder.BASE / 'build/downloads')
@@ -169,7 +263,7 @@ def main(argv=None):
     if cache == usb or usb in cache.parents:
         raise ValueError("Download cache must be on the host, outside the installer USB.")
     config = fix_efi.validate_config(usb, args.config or find_config(usb, read_only=args.check))
-    check_boot_files(config)
+    boot_layout = check_boot_files(config)
     config_before = config.read_bytes()
     fix_efi.update_config(plistlib.loads(config_before), normal_boot=True)
     if args.check:
@@ -181,7 +275,8 @@ def main(argv=None):
     run_dir = builder.BASE / 'build/runs' / stamp
     run_dir.mkdir(parents=True)
     report = {'model': builder.MODEL, 'build': builder.BUILD, 'usb_partition': partition,
-              'status': 'incomplete', 'steps': [],
+              'status': 'incomplete', 'steps': [], 'boot_layout': boot_layout,
+              'phase': 'starting', 'next_steps': ['Retain the logs and backups, then rerun preparation after resolving the reported cause.'],
               'mode': 'installer-and-recovery-kit' if args.with_recovery_kit else 'installer-only', 'full_reinstall_required_in_reported_case': True}
     platform_before = plistlib.loads(config_before)['PlatformInfo']
     report['efi_before'] = {
@@ -212,14 +307,24 @@ def main(argv=None):
                 handle.flush()
 
         log('Preparing ' + builder.MODEL + ' / ' + builder.BUILD + '; USB logs: ' + str(usb_log_dir))
+        log('Detected OpenCore boot layout: ' + boot_layout)
+        log('Host log, report and package backups: ' + str(run_dir))
+        report['phase'] = 'preflight'
+        log('[1/4] Checking write access and preparation requirements.')
+        config = ensure_writable_efi(usb, config)
+        assert_same_usb(usb, partition)
+        check_write_access(usb, config)
         try:
             verify_installer(usb)
             if args.with_recovery_kit:
                 verify_payloads(usb, partition)
             log('Existing selected payloads verify; reusing them.')
             report['steps'].append('verified-existing-payloads')
+            log('[2/4] Selected packages already verify; downloads are unnecessary.')
         except (OSError, ValueError) as reason:
-            log('Preparing missing or changed payloads: ' + str(reason))
+            check_build_tools(args.with_recovery_kit)
+            report['phase'] = 'packages'
+            log('[2/4] Preparing missing or changed packages: ' + str(reason))
             output = run_dir / 'USB-Kit'
             command = [sys.executable, str(builder.BASE / 'build_kit.py'), '--usb', str(usb),
                        '--download', '--cache', str(cache), '--output', str(output)]
@@ -237,10 +342,13 @@ def main(argv=None):
                 if supplied is not None:
                     command.extend([option, str(supplied.resolve())])
             with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as process:
+                last_line = ''
                 for line in process.stdout:
                     log(line.rstrip('\n'))
+                    if line.strip():
+                        last_line = line.strip()
                 if process.wait():
-                    raise ValueError('Offline package preparation failed; see prepare.log.')
+                    raise ValueError('Offline package preparation failed: ' + last_line + '; see prepare.log.')
             assert_same_usb(usb, partition)
             fix_efi.validate_config(usb, config)
             if config.read_bytes() != config_before:
@@ -249,11 +357,17 @@ def main(argv=None):
             report['steps'].append('deployed-selected-payloads-with-host-backups')
         assert_same_usb(usb, partition)
         fix_efi.validate_config(usb, config)
+        report['phase'] = 'efi'
+        log('[3/4] Backing up and applying the EFI configuration changes.')
         backup = fix_efi.apply_config(config, normal_boot=True, expected_bytes=config_before)
         report['efi_backup'] = str(backup) if backup else None
+        report['phase'] = 'verification'
+        log('[4/4] Verifying package hashes, permissions and boot configuration.')
         permissions(usb, repair=True, recovery_kit=args.with_recovery_kit)
         audit(usb, partition, config, recovery_kit=args.with_recovery_kit)
         report['status'] = 'verified'
+        report['phase'] = 'complete'
+        report['next_steps'] = ['Safely eject both USB volumes.', 'Follow README step 3 to install Tahoe through USB EFI Boot.']
         report['steps'].extend(['verified-efi-and-normal-boot', 'normalized-permissions', 'final-audit-passed'])
         report['efi_after'] = {'SystemProductName': builder.MODEL, 'BoardProduct': fix_efi.BOARD, 'UpdateDataHub': True}
         log('Next: eject the USB and follow the README installation steps.')
@@ -261,8 +375,11 @@ def main(argv=None):
     except Exception as exc:
         report['status'] = 'incomplete'
         report['error'] = str(exc)
+        report['next_steps'] = next_actions(exc)
         for handle in log_handles:
             handle.write('STOP: ' + str(exc) + '\n')
+            for action in report['next_steps']:
+                handle.write('NEXT: ' + action + '\n')
         raise
     finally:
         try:
@@ -275,6 +392,9 @@ def main(argv=None):
                     if report['status'] == 'verified':
                         report['status'] = 'incomplete'
                         report['error'] = 'USB report could not be saved: ' + str(exc)
+                        report['phase'] = 'report-saving'
+                        report['next_steps'] = ['Keep the USB connected and retain the host logs and backups.',
+                                                'Resolve the USB write error and rerun preparation; require a final PASS.']
                         (run_dir / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
                         raise OSError(report['error']) from exc
                     print('USB report copy failed; host report remains at ' + str(run_dir) + ': ' + str(exc))
@@ -289,4 +409,7 @@ if __name__ == '__main__':
     try:
         main()
     except (ValueError, OSError, subprocess.CalledProcessError, KeyError) as exc:
-        raise SystemExit('STOP: ' + str(exc))
+        print('STOP: ' + str(exc), file=sys.stderr)
+        for action in next_actions(exc):
+            print('NEXT: ' + action, file=sys.stderr)
+        raise SystemExit(1)

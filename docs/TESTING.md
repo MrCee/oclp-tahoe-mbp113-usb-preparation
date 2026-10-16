@@ -1,8 +1,8 @@
 # Validation and limits
 
-The original hardware result and the public packaging tests answer different questions.
+This is USB preparation automation, not a proven universal recovery fix. The manual hardware result and the public automated tests answer different questions. The optional custom Recovery helper is experimental.
 
-## Physical-machine result
+## Physical-machine result and automation status
 
 The owner confirmed a working Tahoe installation and completed user setup on a **mid-2014 MacBookPro11,3 only after erasing the internal drive again and reinstalling Tahoe from the fully modified USB**. KDK staging and repair attempts on the earlier installation had left it unusable. The public source preserves the recovery/staging logic, replaces the private USB identity with a creator-time binding, and uses the neutral service label `local.mbp113-repair`.
 
@@ -12,7 +12,7 @@ The public packaging has not been run on a second physical Mac. There are no cla
 
 ## Automated fixture checks
 
-**2026-10-17 result:** all 56 checks passed on the preparation iMac. Generated test output remains local and ignored.
+**2026-10-17 result:** all 71 checks passed on the preparation iMac. Generated test output remains local and ignored.
 
 Run on a working macOS development machine:
 
@@ -26,7 +26,8 @@ The script builds and ad-hoc signs the x86_64 native utility, checks the Bash sc
 | :--- | ---: | :--- |
 | Creator, EFI and native utility | 10 | Temporary files; mocked disk metadata; native XML/binary plist and SHA-256 operations |
 | Optional Recovery preparation and EFI discovery | 19 | Disposable USB/EFI fixtures; package building mocked, native deployment hashes executed; no real disks |
-| Default installer-only preparation | 9 | Package/EFI fixtures and real Python deployment; automatic KDK image acquisition mocked; compiler/extraction prohibited |
+| Default installer-only preparation and boot layout detection | 22 | Package/EFI fixtures and real Python deployment; automatic KDK image acquisition mocked; compiler/extraction prohibited |
+| Preparation prerequisites | 2 | Installer-only mode needs no compiler; optional mode reports absent compiler clearly |
 | Normal-boot startup job | 13 | Disposable filesystem; disk, patcher, power, signature and reboot commands stubbed |
 | Recovery staging | 5 | Disposable System/Data/USB/EFI fixtures; destructive or hardware commands stubbed |
 
@@ -36,11 +37,11 @@ The EFI tests verify that only the three documented DataHub fields change by def
 
 The optional Recovery preparation checks exercise a fresh kit, incomplete kit repair with backups, reuse and idempotence, normal-boot NVRAM replacement, audit-only operation without file/mode changes, permission repair, same-USB EFI discovery and read-only mounting. They also reject missing enabled kexts, conflicting models, an internal/wrong EFI, nested backup configs, symlink destinations, corrupt/duplicate manifests, download caches on the USB, and disk/config changes during preparation. The package-builder subprocess is replaced with tiny fixtures in these orchestration tests; actual extraction/layout is covered by the real-package check below.
 
-The default installer-only checks verify that only the two pinned packages and scoped EFI settings are prepared; no Recovery archive, helper or daemon is created. They cover local and downloaded packages, read-only KDK mounting and detachment, repair with backups, repeat runs, audit-only operation, and preservation of old optional kit files. Tests fail if package expansion or compilation is invoked by the installer-only builder. The default audit checks packages and EFI, while `--with-recovery-kit --check` also requires the optional kit.
+The default installer-only checks verify that only the two pinned packages and scoped EFI settings are prepared; no Recovery archive, helper or daemon is created. They cover local and downloaded packages, read-only KDK mounting and detachment, repair with backups, repeat runs, audit-only operation, and preservation of old optional kit files. Tests fail if package expansion or compilation is invoked by the installer-only builder. Additional checks cover Apple-only, UEFI and combined boot layouts, genuinely missing or empty bootstraps, symlink rejection, read-only EFI remounting without force, busy mounts, changed EFI identities, cleaned-up write probes, and actionable failure reports before downloads. The default audit checks packages and EFI, while `--with-recovery-kit --check` also requires the optional kit.
 
 **These fixtures do not invoke OCLP or root-patch the development Mac.** Stubbing signature and disk commands allows testing the orchestration; it does not replace signature verification and real disk validation during actual preparation.
 
-## Real-package assembly check
+## Real-package assembly and live boot-file checks
 
 **2026-10-16 result:** assembly and the complete generated manifest passed using the pinned official packages. The download asset hashes were also compared with GitHub's release-asset digests.
 
@@ -56,5 +57,7 @@ This check uses a disposable test partition identifier and a host output directo
 - A different macOS build, OCLP revision, model or graphics configuration needs separate review.
 - The fixture files contain placeholders in place of actual app/kernel binaries. Only the real-package assembly check validates the authentic payload layout.
 - A correct package manifest does not prove a future boot or root patch will succeed. Inspect the generated logs and verify a working user session.
+
+On 2026-10-17, read-only inspection of the owner's freshly created physical USB confirmed the RC3 Apple bootstrap layout at `System/Library/CoreServices/boot.efi`, a MacBookPro11,3 config and all referenced OpenCore files. The corrected preflight accepted that layout without copying or relocating any loader. This verifies boot-file discovery; it does not constitute a successful installation with the public script.
 
 No private machine identifiers or raw owner logs are used as public test fixtures.
