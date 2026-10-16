@@ -377,10 +377,13 @@ def main(argv=None):
         audit(usb, partition, config, recovery_kit=args.with_recovery_kit)
         report['status'] = 'verified'
         report['phase'] = 'complete'
-        report['next_steps'] = ['Safely eject both USB volumes.', 'Follow README step 3 to install Tahoe through USB EFI Boot.']
+        report['next_steps'] = ['Safely eject both USB volumes.',
+                                'Follow README step 3 to install Tahoe through USB EFI Boot.',
+                                'Then follow README step 4 on the MacBook: install internal OpenCore, preserve the fixes, and test without USB.']
         report['steps'].extend(['verified-efi-and-normal-boot', 'normalized-permissions', 'final-audit-passed'])
         report['efi_after'] = {'SystemProductName': builder.MODEL, 'BoardProduct': fix_efi.BOARD, 'UpdateDataHub': True}
         log('Next: eject the USB and follow the README installation steps.')
+        log('After setup, README step 4 installs internal OpenCore and preserves the fixes; keep the USB until a USB-free boot passes.')
         log('This command does not erase the internal disk, install macOS, or guarantee a successful boot.')
     except Exception as exc:
         report['status'] = 'incomplete'

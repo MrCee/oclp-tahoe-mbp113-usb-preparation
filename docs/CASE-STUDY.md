@@ -1,6 +1,6 @@
 # From a Lilu loop to completed Tahoe setup
 
-**Final outcome reported by the owner:** Tahoe is working and first-user setup is complete **after erasing the internal drive again and doing a full reinstall from the fully modified USB**. The earlier installation remained unusable despite KDK staging and repair attempts. The final clean reinstall is an essential part of the reported sequence.
+**Installation outcome reported by the owner:** Tahoe is working and first-user setup is complete **after erasing the internal drive again and doing a full reinstall from the fully modified USB**. The earlier installation remained unusable despite KDK staging and repair attempts. The final clean reinstall is an essential part of the reported sequence. **Later clarification on 2026-10-17: the new installation works through the USB but does not boot without it. Internal OpenCore handover and a USB-free restart remain unverified.**
 
 This record describes one mid-2014 15-inch **MacBookPro11,3**, with Intel Iris Pro (Haswell) and NVIDIA GeForce GT 750M (Kepler), using **OCLP 3.0.0 RC3** and **Tahoe 26.7.1, build 25G241**. The internal disk had been wiped. The USB supplied the working OpenCore EFI during recovery. No working user session existed when the repair was prepared.
 
@@ -101,13 +101,13 @@ The successful order was:
 3. Run a full Tahoe installation from that fully modified USB.
 4. Complete first-user setup and reach a working desktop.
 
-The reported result must therefore include the clean reinstall. It should not be summarized as “copy the KDK, run the script and the original installation is fixed.” Erasing removes existing data, so a reader reproducing that route must preserve a backup first. This is the owner's observed result, not a universal requirement for every Mac or proof of exactly how the installer used each staged component.
+The reported result must therefore include the clean reinstall. It should not be summarized as “copy the KDK, run the script and the original installation is fixed.” Erasing removes existing data, so a reader reproducing that route must preserve a backup first. This is the owner's observed result, not a universal requirement for every Mac or proof of exactly how the installer used each staged component. A completed installation still needs OpenCore on the internal EFI to boot independently; erasing again is not the remedy for that missing handover.
 
 No post-success performance benchmark, GPU-switching test, sleep/wake qualification or update test has been claimed.
 
 ## What to reproduce, and what to leave as history
 
-The [README](../README.md) now presents installer-only preparation followed by a clean installation. The custom helper is an [optional Recovery fallback](RECOVERY.md), selected with `--with-recovery-kit`; it is not built by the default command. The failed Recovery package installation, duplicate mounts, original UUID assumption and repeated attempts to launch tools from the unusable setup screen are history, not additional repairs to repeat.
+The [README](../README.md) now presents installer-only preparation, clean installation, and internal OpenCore handover. OCLP performs the internal installation; `finish_install.py` then reapplies the same model fixes with config backups. The new helper is fixture-tested; a successful USB-free hardware restart is still pending. The custom Recovery helper is an [optional fallback](RECOVERY.md), selected with `--with-recovery-kit`; it is not built by the default command. The failed Recovery package installation, duplicate mounts, original UUID assumption and repeated attempts to launch tools from the unusable setup screen are history, not additional repairs to repeat.
 
 There is no established “wait exactly 30 minutes” requirement. Progress should be judged from logs and a successful user session, not wallpaper or an arbitrary delay.
 

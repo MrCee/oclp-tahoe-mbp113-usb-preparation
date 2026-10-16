@@ -2,6 +2,8 @@
 
 **Status:** this custom helper was not demonstrated to recover the earlier installation by itself. The normal USB preparation route does not use it.
 
+If Tahoe works with the USB inserted but will not boot without it, use [the internal OpenCore handover in README step 4](../README.md#4-finish-opencore-on-the-internal-drive), not this Recovery helper. Keep the completed installation.
+
 Prepare the optional files on the working Mac **before** using the Recovery commands below:
 
 ```bash

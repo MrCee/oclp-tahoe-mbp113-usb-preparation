@@ -4,9 +4,13 @@
 ![macOS: 26.7.1](https://img.shields.io/badge/macOS-26.7.1%20%2825G241%29-111827)
 ![OCLP: RC3](https://img.shields.io/badge/OCLP-3.0.0--rc.3-f59e0b)
 
-**Prepare your USB, then install Tahoe. One preparation command handles the verified installer packages and model-specific EFI settings.**
+**Prepare your USB, install Tahoe, then finish the internal OpenCore setup. One preparation command handles the verified installer packages and model-specific EFI settings.**
 
 For the **mid-2014 15-inch MacBook Pro, MacBookPro11,3**, with Intel Iris Pro and NVIDIA GT 750M. This unofficial preparation tool supports **Tahoe 26.7.1 / build 25G241 and OCLP 3.0.0 RC3 only**. A different model or installer build stops preparation.
+
+**Current hardware status:** Tahoe installs and reaches a usable desktop with completed user setup through the USB's OpenCore. The current installation **does not boot without the USB**. Step 4 covers the internal OpenCore handover; its new helper has fixture tests, not a confirmed hardware boot result. Keep the working USB as your fallback.
+
+**Already installed and working with the USB? Go straight to [step 4](#4-finish-opencore-on-the-internal-drive). Do not erase or reinstall Tahoe to fix this boot dependency.**
 
 ## Before you start
 
@@ -66,7 +70,26 @@ This is the clean-install sequence used for the reported working result. **Erasi
 4. During restarts, boot through **USB EFI Boot**. Select the continuing **macOS Installer** entry when present, then the internal macOS entry when installation is complete. Do not restart a new installation from the USB each time.
 5. Boot normally and complete user setup. In OCLP, check **Post-Install Root Patch**; apply any required patches it reports, then reboot through USB EFI. Confirm a usable desktop and keep the USB available while it supplies OpenCore.
 
-**There is no `repair.sh` step in this main route.** The command prepares the USB; it does not erase the internal disk, install macOS or prove a successful boot. The owner reported a working installation after manual USB changes and a clean reinstall. The automated preparation is tested separately; its fresh MacBook installation test is still pending.
+**There is no `repair.sh` step in this main route.** The command prepares the USB; it does not erase the internal disk, install macOS or install internal OpenCore. Reaching a desktop through USB EFI is an installation result, not proof the Mac can boot without the USB. Continue below.
+
+## 4. Finish OpenCore on the internal drive
+
+Do this **on the MacBook Pro**, in its installed Tahoe desktop, while booted through the working USB EFI. Keep the USB unchanged as your rescue boot device. This is separate from **Post-Install Root Patch**: root patches do not install the internal bootloader.
+
+1. Open **OCLP 3.0.0 RC3**, confirm **Target Model → MacBookPro11,3**, then choose **Build and Install OpenCore**.
+2. Install to the **internal physical drive containing Tahoe**, then its **EFI partition**. Identify it by its name, capacity and internal status; do not assume a disk number. If OCLP offers a reboot, **wait until the next step is complete**.
+3. On this MacBook, use a current copy of this repo and **Python 3.9 or newer**. If Python is missing, install it from [python.org](https://www.python.org/downloads/macos/) before continuing. If you already cloned the repo here, run `git pull --ff-only` in that folder. Otherwise clone it as in step 2 of this guide. From the repo folder run:
+
+   ```bash
+   sudo python3 finish_install.py
+   ```
+
+   The helper identifies the internal EFI belonging to the **currently running APFS system**, checks the Mac model/build and existing OpenCore files, backs up the config, then reapplies the same DataHub and normal-boot settings as USB preparation. A fresh OCLP build can otherwise lose those fixes. It does not copy a personal USB EFI, build/install OpenCore, erase data, install packages, root-patch or reboot. If internal OpenCore is absent, it stops with instructions to complete steps 1–2.
+4. Require `PASS: internal EFI configuration verified`. Shut down, unplug the USB, then start holding **Option**. Select the **internal EFI Boot**, then **Macintosh HD** in OpenCore. Once this works, hold **Control** while selecting the internal EFI entry in Apple's Option picker to make it the default, and test an ordinary restart without the USB.
+
+**Success means a usable desktop after an ordinary restart with the USB disconnected.** The helper verifies files/settings, not firmware startup. Its backup and report are under `build/internal-efi/<timestamp>/`, with a config backup also beside the internal `EFI/OC/config.plist`. `sudo python3 finish_install.py --check` audits the internal settings without changing files; it can mount an unmounted EFI read-only.
+
+**If it fails:** shut down, reconnect the prepared USB and boot **USB EFI Boot → Macintosh HD**. Keep the error text and helper report. Do not erase the installed OS. If there is no internal EFI entry, recheck OCLP's internal-drive installation. If the Lilu model error returns, recheck the internal config fixes. Rebuilding internal OpenCore later requires rerunning `finish_install.py` before rebooting. A read-only internal EFI must be unmounted normally before a write run; no force-unmount is attempted.
 
 ## Checks and logs
 
@@ -110,6 +133,6 @@ The same checksum checks apply. Use `--cache "/path/on/working-Mac/cache"` for a
 
 [Official RC3 release](https://github.com/dortania/OpenCore-Legacy-Patcher/releases/tag/3.0.0-rc.3) · [Matching KDK](https://github.com/dortania/KdkSupportPkg/releases/tag/25G241) · [RC3 installer package placement](https://github.com/dortania/OpenCore-Legacy-Patcher/blob/3.0.0-rc.3/opencore_legacy_patcher/wx_gui/gui_macos_installer_flash.py#L443-L481) · [RC3 manual assets guidance](https://discord.com/channels/417165963327176704/1389230559674368062/1557563105897226298)
 
-[OCLP post-install patch guidance](https://dortania.github.io/OpenCore-Legacy-Patcher/POST-INSTALL.html#applying-post-install-volume-patches) · [Testing and limitations](docs/TESTING.md) · [Separate troubleshooting history](docs/CASE-STUDY.md)
+[OCLP booting without USB](https://dortania.github.io/OpenCore-Legacy-Patcher/POST-INSTALL.html#booting-without-usb-drive) · [OCLP post-install patch guidance](https://dortania.github.io/OpenCore-Legacy-Patcher/POST-INSTALL.html#applying-post-install-volume-patches) · [Testing and limitations](docs/TESTING.md) · [Separate troubleshooting history](docs/CASE-STUDY.md)
 
 OpenCore, OCLP and the actual patches belong to their upstream contributors; the KDK is Apple's work. This repo supplies custom preparation code and documentation, developed with AI assistance. No upstream endorsement is implied. The repo contains source, not installer binaries, personal EFI configs or private logs. See [NOTICE.md](NOTICE.md) and [LICENSE](LICENSE).

@@ -8,11 +8,13 @@ The owner confirmed a working Tahoe installation and completed user setup on a *
 
 The automated launcher/staging checks below verify script behavior. They do not demonstrate that the script alone repaired the original installation, or that a clean reinstall is universally required.
 
+**2026-10-17 hardware clarification:** the newly completed installation is usable through USB OpenCore but cannot yet boot without the USB. Independent startup is not confirmed. The README now includes OCLP's internal-drive installation and `finish_install.py` to preserve the model fixes afterward. The helper's PASS is configuration verification only; USB-free firmware startup still requires a physical test.
+
 The public packaging has not been run on a second physical Mac. There are no claimed performance, sleep/wake, GPU switching or future-update results. The sequence was not repeated with each dependency removed individually.
 
 ## Automated fixture checks
 
-**2026-10-17 result:** all 80 checks passed on the preparation iMac. Generated test output remains local and ignored.
+**2026-10-17 result:** all 94 checks passed on the preparation iMac, including 14 new internal-EFI handover checks. Generated test output remains local and ignored.
 
 Run on a working macOS development machine:
 
@@ -29,6 +31,7 @@ The script builds and ad-hoc signs the x86_64 native utility, checks the Bash sc
 | Default installer-only preparation and boot layout detection | 23 | Package/EFI fixtures and real Python deployment; automatic KDK image acquisition mocked; compiler/extraction prohibited |
 | Preparation prerequisites | 2 | Installer-only mode needs no compiler; optional mode reports absent compiler clearly |
 | Download, copy progress and transfer integrity | 8 | Mocked responses; known/unknown sizes, scrolling bar, speed/ETA, large-file hash/copy progress, preserved copy metadata, truncated/corrupt transfers and interruption cleanup |
+| Internal OpenCore config handover | 14 | Disposable EFI; disk/model/build commands mocked; no physical disk mounted or changed |
 | Normal-boot startup job | 13 | Disposable filesystem; disk, patcher, power, signature and reboot commands stubbed |
 | Recovery staging | 5 | Disposable System/Data/USB/EFI fixtures; destructive or hardware commands stubbed |
 
@@ -39,6 +42,8 @@ The EFI tests verify that only the three documented DataHub fields change by def
 The optional Recovery preparation checks exercise a fresh kit, incomplete kit repair with backups, reuse and idempotence, normal-boot NVRAM replacement, audit-only operation without file/mode changes, permission repair, same-USB EFI discovery and read-only mounting. They also reject missing enabled kexts, conflicting models, an internal/wrong EFI, nested backup configs, symlink destinations, corrupt/duplicate manifests, download caches on the USB, and disk/config changes during preparation. The package-builder subprocess is replaced with tiny fixtures in these orchestration tests; actual extraction/layout is covered by the real-package check below.
 
 The default installer-only checks verify that only the two pinned packages and scoped EFI settings are prepared; no Recovery archive, helper or daemon is created. They cover local and downloaded packages, read-only KDK mounting and detachment, repair with backups, repeat runs, audit-only operation, and preservation of old optional kit files. Tests fail if package expansion or compilation is invoked by the installer-only builder. Additional checks cover Apple-only, UEFI and combined boot layouts, genuinely missing or empty bootstraps, symlink rejection, read-only EFI remounting without force, busy mounts, changed EFI identities, cleaned-up write probes, and actionable failure reports before downloads. Fresh missing packages now produce a normal preparation status rather than an exception-looking message, while retaining the detailed reason in the private report. Download tests verify progress formatting and cleanup without accessing the network. The default audit checks packages and EFI, while `--with-recovery-kit --check` also requires the optional kit.
+
+Internal handover checks follow a simulated running APFS system to a physical disk other than `disk0`, verify config backups and scoped fixes, and distinguish configuration PASS from USB-free boot success. They cover repeat runs, audit-only and read-only mounting, wrong host/build/model, external or ambiguous storage, missing/unidentified EFI, absent OpenCore/bootstrap, symlinks, read-only write refusal and changed disk identity. An actual `finish_install.py --check` invocation on the preparation iMac also refused the wrong host before disk discovery or mounting. These checks do not install OCLP, change boot defaults or demonstrate a hardware restart.
 
 **These fixtures do not invoke OCLP or root-patch the development Mac.** Stubbing signature and disk commands allows testing the orchestration; it does not replace signature verification and real disk validation during actual preparation.
 
@@ -59,6 +64,6 @@ This check uses a disposable test partition identifier and a host output directo
 - The fixture files contain placeholders in place of actual app/kernel binaries. Only the real-package assembly check validates the authentic payload layout.
 - A correct package manifest does not prove a future boot or root patch will succeed. Inspect the generated logs and verify a working user session.
 
-On 2026-10-17, read-only inspection of the owner's freshly created physical USB confirmed the RC3 Apple bootstrap layout at `System/Library/CoreServices/boot.efi`, a MacBookPro11,3 config and all referenced OpenCore files. The corrected preflight accepted that layout without copying or relocating any loader. This verifies boot-file discovery; it does not constitute a successful installation with the public script.
+On 2026-10-17, read-only inspection of the owner's freshly created physical USB confirmed the RC3 Apple bootstrap layout at `System/Library/CoreServices/boot.efi`, a MacBookPro11,3 config and all referenced OpenCore files. The corrected preflight accepted that layout without copying or relocating any loader. The owner subsequently reported a completed installation usable through the USB, with independent boot failing. This does not verify internal OpenCore or a USB-free startup.
 
 No private machine identifiers or raw owner logs are used as public test fixtures.
