@@ -19,7 +19,7 @@ import fix_efi
 import prepare_usb as prepare
 
 
-class AllInOneTests(unittest.TestCase):
+class UsbFixtures:
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -83,7 +83,7 @@ class AllInOneTests(unittest.TestCase):
             elif (self.host / 'kit' / name).is_file(): shutil.copy2(self.host / 'kit' / name, p)
             else: p.write_bytes(b'archive fixture')
         self.manifest(output)
-        prepare.permissions(output, repair=True)
+        prepare.permissions(output, repair=True, recovery_kit=True)
 
     def manifest(self, output):
         (output / 'MBP113-Repair/SHA256SUMS').write_text(''.join(
@@ -99,19 +99,22 @@ class AllInOneTests(unittest.TestCase):
         return Process()
 
     def run_prepare(self, *extra):
-        prepare.main(['--usb', str(self.usb), '--cache', str(self.host / 'cache'), *extra])
+        prepare.main(['--usb', str(self.usb), '--cache', str(self.host / 'cache'), '--with-recovery-kit', *extra])
 
     def snapshot(self, root):
         return {str(p.relative_to(root)): (p.stat().st_mode & 0o777, p.read_bytes() if p.is_file() else None)
                 for p in root.rglob('*')}
 
+
+
+class AllInOneTests(UsbFixtures, unittest.TestCase):
     def test_fresh_usb_download_build_deploy_efi_permissions_and_logs(self):
         old_boot = (self.efi / 'EFI/BOOT/BOOTx64.efi').read_bytes()
         self.run_prepare()
         self.child.assert_called_once()
         command = self.child.call_args.args[0]
         self.assertIn('--download', command)
-        prepare.audit(self.usb, self.partition, self.config)
+        prepare.audit(self.usb, self.partition, self.config, recovery_kit=True)
         config = plistlib.loads(self.config.read_bytes())
         self.assertEqual(config['NVRAM']['Add'][fix_efi.APPLE_GUID]['boot-args'], '-v keepsyms=1')
         self.assertIn('boot-args', config['NVRAM']['Delete'][fix_efi.APPLE_GUID])
@@ -143,7 +146,7 @@ class AllInOneTests(unittest.TestCase):
         (self.usb / 'Library/Packages/AutoPkg-Assets.pkg').write_bytes(b'bad package')
         (self.usb / 'repair.sh').write_bytes(b'old script')
         self.run_prepare()
-        prepare.audit(self.usb, self.partition, self.config)
+        prepare.audit(self.usb, self.partition, self.config, recovery_kit=True)
         backups = list((self.host / 'build/runs').rglob('usb-backups'))
         self.assertEqual((backups[0] / 'repair.sh').read_bytes(), b'old script')
         self.assertEqual((backups[0] / 'Library/Packages/AutoPkg-Assets.pkg').read_bytes(), b'bad package')
@@ -230,7 +233,7 @@ class AllInOneTests(unittest.TestCase):
         (self.usb / 'Library/Packages/KDK.pkg').unlink()
         (self.usb / 'MBP113-Repair/recovery-tool').chmod(0o644)
         self.run_prepare()
-        prepare.audit(self.usb, self.partition, self.config)
+        prepare.audit(self.usb, self.partition, self.config, recovery_kit=True)
 
     def test_concurrent_efi_write_is_not_overwritten(self):
         original = self.config.read_bytes(); self.config.write_bytes(b'new data')
@@ -238,6 +241,114 @@ class AllInOneTests(unittest.TestCase):
             fix_efi.apply_config(self.config, True, expected_bytes=original)
         self.assertEqual(self.config.read_bytes(), b'new data')
         self.assertEqual(list(self.config.parent.glob('config.before-datahub*')), [])
+
+
+class InstallerOnlyTests(UsbFixtures, unittest.TestCase):
+    def run_prepare(self, *extra):
+        prepare.main(['--usb', str(self.usb), '--cache', str(self.host / 'cache'), *extra])
+
+    def packages(self, output):
+        for name, data in [('AutoPkg-Assets.pkg', self.asset), ('KDK.pkg', self.kdk)]:
+            path = output / 'Library/Packages' / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+
+    def fake_build(self, command, **kwargs):
+        self.packages(Path(command[command.index('--output') + 1]))
+        class Process:
+            stdout = ['fixture packages copied\n']
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def wait(self): return 0
+        return Process()
+
+    def test_default_prepares_packages_and_efi_without_any_recovery_files(self):
+        self.run_prepare()
+        self.child.assert_called_once()
+        self.assertIn('--installer-only', self.child.call_args.args[0])
+        for relative in ['repair.sh', 'MBP113-Repair', 'KDK-25G241.tar.gz']:
+            self.assertFalse((self.usb / relative).exists())
+        prepare.audit(self.usb, self.partition, self.config)
+        report = json.loads(next((self.usb / 'Repair-Logs').rglob('report.json')).read_text())
+        self.assertEqual((report['mode'], report['status']), ('installer-only', 'verified'))
+        self.assertEqual(plistlib.loads(self.config.read_bytes())['PlatformInfo']['DataHub']['BoardProduct'], fix_efi.BOARD)
+
+    def test_default_reuses_valid_packages_and_efi_on_repeat_run(self):
+        self.packages(self.usb)
+        self.run_prepare(); self.run_prepare()
+        self.child.assert_not_called()
+        self.assertEqual(len(list(self.config.parent.glob('config.before-datahub*'))), 1)
+
+    def test_default_ignores_and_preserves_old_optional_kit(self):
+        kit = self.usb / 'MBP113-Repair'; kit.mkdir()
+        (kit / 'common.sh').write_bytes(b'old kit, deliberately not audited')
+        script = self.usb / 'repair.sh'; script.write_bytes(b'old script'); script.chmod(0o600)
+        before = (self.snapshot(kit), script.read_bytes(), script.stat().st_mode)
+        self.run_prepare()
+        self.assertEqual(before, (self.snapshot(kit), script.read_bytes(), script.stat().st_mode))
+        prepare.audit(self.usb, self.partition, self.config)
+        with self.assertRaises((OSError, ValueError)):
+            prepare.audit(self.usb, self.partition, self.config, recovery_kit=True)
+
+    def test_default_audit_needs_no_kit_and_writes_nothing(self):
+        self.packages(self.usb)
+        prepare.permissions(self.usb, repair=True)
+        self.config.write_bytes(plistlib.dumps(fix_efi.update_config(self.original, True)))
+        before = (self.snapshot(self.usb), self.snapshot(self.efi), self.snapshot(self.host))
+        self.run_prepare('--check')
+        self.assertEqual(before, (self.snapshot(self.usb), self.snapshot(self.efi), self.snapshot(self.host)))
+        self.child.assert_not_called()
+
+    def test_default_repairs_and_backs_up_corrupt_package(self):
+        self.packages(self.usb)
+        (self.usb / 'Library/Packages/KDK.pkg').write_bytes(b'bad package')
+        self.run_prepare()
+        backup = next((self.host / 'build/runs').rglob('usb-backups/Library/Packages/KDK.pkg'))
+        self.assertEqual(backup.read_bytes(), b'bad package')
+        prepare.audit(self.usb, self.partition, self.config)
+        self.assertFalse((self.usb / 'MBP113-Repair').exists())
+
+    def test_default_audit_rejects_missing_package(self):
+        self.packages(self.usb)
+        self.config.write_bytes(plistlib.dumps(fix_efi.update_config(self.original, True)))
+        (self.usb / 'Library/Packages/AutoPkg-Assets.pkg').unlink()
+        with self.assertRaises(OSError): self.run_prepare('--check')
+        self.child.assert_not_called()
+
+    def test_installer_builder_local_packages_never_expand_or_compile(self):
+        sources = self.host / 'sources'; self.packages(sources)
+        output = self.host / 'installer-output'
+        with patch.object(builder, 'assemble', side_effect=AssertionError('must not expand/compile')) as assembly:
+            builder.main(['--usb', str(self.usb), '--installer-only',
+                          '--assets-pkg', str(sources / 'Library/Packages/AutoPkg-Assets.pkg'),
+                          '--kdk-pkg', str(sources / 'Library/Packages/KDK.pkg'), '--output', str(output)])
+            assembly.assert_not_called()
+        self.assertEqual({str(p.relative_to(output)) for p in output.rglob('*') if p.is_file()},
+                         {'Library/Packages/AutoPkg-Assets.pkg', 'Library/Packages/KDK.pkg'})
+        self.child.assert_not_called()
+
+    def test_installer_builder_downloads_and_detaches_readonly_kdk_without_expansion(self):
+        sources = self.host / 'downloaded'; self.packages(sources)
+        mount = self.host / 'mounted-kdk'; mount.mkdir()
+        (mount / 'KernelDebugKit.pkg').write_bytes(self.kdk)
+        dmg = sources / 'KDK.dmg'; dmg.write_bytes(b'dmg fixture')
+        def downloaded(name, cache):
+            return sources / 'Library/Packages/AutoPkg-Assets.pkg' if name == 'AutoPkg-Assets.pkg' else dmg
+        with patch.object(builder, 'download', side_effect=downloaded) as download, \
+             patch.object(builder.subprocess, 'check_output', return_value=plistlib.dumps({'system-entities': [{'mount-point': str(mount)}]})) as attach, \
+             patch.object(builder.subprocess, 'run') as detach, \
+             patch.object(builder, 'assemble', side_effect=AssertionError('must not expand/compile')):
+            builder.main(['--usb', str(self.usb), '--installer-only', '--download', '--output', str(self.host / 'download-output')])
+        self.assertEqual([call.args[0] for call in download.call_args_list], ['AutoPkg-Assets.pkg', 'KDK-25G241.dmg'])
+        self.assertIn('-readonly', attach.call_args.args[0])
+        self.assertEqual(detach.call_args.args[0], ['/usr/bin/hdiutil', 'detach', str(mount)])
+
+    def test_installer_deployment_rejects_extra_output_files(self):
+        output = self.host / 'output'; self.packages(output)
+        (output / 'unexpected').write_bytes(b'not managed')
+        with self.assertRaisesRegex(ValueError, 'exactly the two pinned'):
+            builder.deploy(output, self.usb, backup_dir=self.host / 'backups', recovery_kit=False)
+        self.assertFalse((self.usb / 'Library').exists())
 
 
 class EfiDiscoveryTests(unittest.TestCase):

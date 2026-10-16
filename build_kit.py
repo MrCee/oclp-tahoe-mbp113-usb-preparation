@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a USB-specific offline Recovery kit. Run on a functioning macOS host.
+"""Build pinned installer packages or an offline Recovery kit on a working Mac.
 
 Does not install packages on the host, format disks, patch macOS, or edit EFI.
 Only --deploy writes the prepared kit to the selected USB.
@@ -153,17 +153,28 @@ def assemble(output, partition, assets, kdk_pkg, work):
     run([kit / "recovery-tool", "sha-check", "MBP113-Repair/SHA256SUMS"], cwd=str(output))
 
 
-def deploy(output, usb, backup_dir=None):
+def deploy(output, usb, backup_dir=None, recovery_kit=True):
     # Only these explicitly documented paths are written. The installer app,
     # shared-support image, EFI, and other volumes are never replaced here.
-    for relative in ["MBP113-Repair", "repair.sh", "Library", "Library/Packages",
-                     "Library/Packages/AutoPkg-Assets.pkg", "Library/Packages/KDK.pkg", "KDK-25G241.tar.gz"]:
+    guarded = ["Library", "Library/Packages", "Library/Packages/AutoPkg-Assets.pkg", "Library/Packages/KDK.pkg"]
+    if recovery_kit:
+        guarded += ["MBP113-Repair", "repair.sh", "KDK-25G241.tar.gz"]
+    for relative in guarded:
         if (usb / relative).is_symlink():
             raise ValueError("Refusing a symlinked USB destination: " + relative)
     kit = usb / "MBP113-Repair"
-    if backup_dir is None and (kit.exists() or (usb / "repair.sh").exists()):
+    if recovery_kit and backup_dir is None and (kit.exists() or (usb / "repair.sh").exists()):
         raise ValueError("A recovery kit already exists on the USB. Preserve it before deploying another version.")
-    for relative in ["Library/Packages/AutoPkg-Assets.pkg", "Library/Packages/KDK.pkg", "KDK-25G241.tar.gz"]:
+    payload_paths = ["Library/Packages/AutoPkg-Assets.pkg", "Library/Packages/KDK.pkg"]
+    if recovery_kit:
+        payload_paths.append("KDK-25G241.tar.gz")
+    else:
+        actual = {p.relative_to(output).as_posix() for p in output.rglob("*") if p.is_file()}
+        if actual != set(payload_paths):
+            raise ValueError("Installer-only output must contain exactly the two pinned packages.")
+        require_hash(output / payload_paths[0], ASSETS_SHA)
+        require_hash(output / payload_paths[1], KDK_PKG_SHA)
+    for relative in payload_paths:
         src, dest = output / relative, usb / relative
         if dest.exists() and not dest.is_file():
             raise ValueError("Unexpected non-file USB destination: " + str(dest))
@@ -219,7 +230,11 @@ def deploy(output, usb, backup_dir=None):
         finally:
             if os.path.exists(temp):
                 os.unlink(temp)
-    run([output / "MBP113-Repair/recovery-tool", "sha-check", "MBP113-Repair/SHA256SUMS"], cwd=str(usb))
+    if recovery_kit:
+        run([output / "MBP113-Repair/recovery-tool", "sha-check", "MBP113-Repair/SHA256SUMS"], cwd=str(usb))
+    else:
+        require_hash(usb / "Library/Packages/AutoPkg-Assets.pkg", ASSETS_SHA)
+        require_hash(usb / "Library/Packages/KDK.pkg", KDK_PKG_SHA)
 
 
 def main(argv=None):
@@ -230,7 +245,8 @@ def main(argv=None):
     parser.add_argument("--download", action="store_true", help="Fetch pinned official assets and matching KDK DMG")
     parser.add_argument("--cache", type=Path, default=BASE / "build/downloads")
     parser.add_argument("--output", type=Path, default=BASE / "build/USB-Kit")
-    parser.add_argument("--deploy", action="store_true", help="Also copy the verified kit to the selected USB")
+    parser.add_argument("--deploy", action="store_true", help="Also copy the verified output to the selected USB")
+    parser.add_argument("--installer-only", action="store_true", help="Prepare only the two installer packages; no extraction or compiler required")
     args = parser.parse_args(argv)
     usb, partition = validate_usb(args.usb)
     output = args.output.resolve()
@@ -238,8 +254,9 @@ def main(argv=None):
     if output == usb or usb in output.parents or output.exists():
         raise ValueError("Choose a new, non-existing output directory on the host Mac, outside the USB.")
     output.parent.mkdir(parents=True, exist_ok=True)
-    if shutil.disk_usage(output.parent).free < 15 * 1024 ** 3:
-        raise ValueError("At least 15 GiB host free space is required.")
+    needed_gib = 8 if args.installer_only else 15
+    if shutil.disk_usage(output.parent).free < needed_gib * 1024 ** 3:
+        raise ValueError("At least " + str(needed_gib) + " GiB host free space is required.")
     assets, kdk_pkg = args.assets_pkg, args.kdk_pkg
     image = None
     try:
@@ -261,15 +278,26 @@ def main(argv=None):
         kdk_pkg = require_hash(kdk_pkg, KDK_PKG_SHA)
         with tempfile.TemporaryDirectory(prefix="mbp113-build-", dir=str(output.parent)) as work:
             output.mkdir()
-            assemble(output, partition, assets, kdk_pkg, Path(work))
+            if args.installer_only:
+                packages = output / "Library/Packages"
+                packages.mkdir(parents=True)
+                shutil.copy2(assets, packages / "AutoPkg-Assets.pkg")
+                shutil.copy2(kdk_pkg, packages / "KDK.pkg")
+                require_hash(packages / "AutoPkg-Assets.pkg", ASSETS_SHA)
+                require_hash(packages / "KDK.pkg", KDK_PKG_SHA)
+            else:
+                assemble(output, partition, assets, kdk_pkg, Path(work))
         if args.deploy:
             # Revalidate after the long build: USB may have been disconnected.
             current_usb, current_partition = validate_usb(usb)
             if current_partition != partition:
                 raise ValueError("USB identity changed during the build.")
-            deploy(output, current_usb)
-        print("Verified kit:", output)
-        print("USB GPT identity was bound locally; it is not part of the public source.")
+            deploy(output, current_usb, recovery_kit=not args.installer_only)
+        print("Verified output:", output)
+        if args.installer_only:
+            print("Installer packages prepared; no Recovery archives or tools were built.")
+        else:
+            print("USB GPT identity was bound locally; it is not part of the public source.")
     finally:
         if image:
             subprocess.run(["/usr/bin/hdiutil", "detach", image], check=False)

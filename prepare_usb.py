@@ -3,7 +3,6 @@
 import argparse
 import datetime
 import json
-import os
 from pathlib import Path, PurePosixPath
 import plistlib
 import re
@@ -87,6 +86,11 @@ def check_boot_files(config_path):
                     raise ValueError('Missing enabled kext file: ' + str(path.relative_to(efi)))
 
 
+def verify_installer(usb):
+    builder.require_hash(safe_path(usb, 'Library/Packages/AutoPkg-Assets.pkg'), builder.ASSETS_SHA)
+    builder.require_hash(safe_path(usb, 'Library/Packages/KDK.pkg'), builder.KDK_PKG_SHA)
+
+
 def verify_payloads(usb, partition):
     builder.require_hash(safe_path(usb, 'Library/Packages/AutoPkg-Assets.pkg'), builder.ASSETS_SHA)
     builder.require_hash(safe_path(usb, 'Library/Packages/KDK.pkg'), builder.KDK_PKG_SHA)
@@ -116,11 +120,14 @@ def verify_payloads(usb, partition):
         raise ValueError('Kit startup service differs from this release.')
 
 
-def permissions(usb, repair=False):
-    targets = {'Library': 0o755, 'Library/Packages': 0o755, 'MBP113-Repair': 0o755}
-    targets.update({relative: (0o755 if relative.endswith('/recovery-tool') else 0o644)
-                    for relative in REQUIRED})
-    targets['MBP113-Repair/SHA256SUMS'] = 0o644
+def permissions(usb, repair=False, recovery_kit=False):
+    targets = {'Library': 0o755, 'Library/Packages': 0o755,
+               'Library/Packages/AutoPkg-Assets.pkg': 0o644, 'Library/Packages/KDK.pkg': 0o644}
+    if recovery_kit:
+        targets['MBP113-Repair'] = 0o755
+        targets.update({relative: (0o755 if relative.endswith('/recovery-tool') else 0o644)
+                        for relative in REQUIRED})
+        targets['MBP113-Repair/SHA256SUMS'] = 0o644
     for relative, mode in targets.items():
         path = safe_path(usb, relative)
         if repair:
@@ -129,15 +136,17 @@ def permissions(usb, repair=False):
             raise ValueError('Unexpected permissions at ' + relative)
 
 
-def audit(usb, partition, config):
+def audit(usb, partition, config, recovery_kit=False):
     check_boot_files(config)
     original = plistlib.loads(config.read_bytes())
     if fix_efi.update_config(original, normal_boot=True) != original:
         raise ValueError('DataHub or normal-boot NVRAM settings still need correction.')
-    verify_payloads(usb, partition)
-    permissions(usb)
-    builder.run([usb / 'MBP113-Repair/recovery-tool', 'sha-check', 'MBP113-Repair/SHA256SUMS'], cwd=str(usb))
-    builder.run([usb / 'MBP113-Repair/recovery-tool', 'lint', usb / 'MBP113-Repair/local.mbp113-repair.plist'])
+    verify_installer(usb)
+    permissions(usb, recovery_kit=recovery_kit)
+    if recovery_kit:
+        verify_payloads(usb, partition)
+        builder.run([usb / 'MBP113-Repair/recovery-tool', 'sha-check', 'MBP113-Repair/SHA256SUMS'], cwd=str(usb))
+        builder.run([usb / 'MBP113-Repair/recovery-tool', 'lint', usb / 'MBP113-Repair/local.mbp113-repair.plist'])
 
 
 def assert_same_usb(usb, partition):
@@ -150,6 +159,7 @@ def main(argv=None):
     parser.add_argument('--usb', required=True, type=Path)
     parser.add_argument('--config', type=Path, help='Optional override; otherwise find/mount this USB EFI automatically')
     parser.add_argument('--check', action='store_true', help='Audit only; no files on USB/EFI are changed')
+    parser.add_argument('--with-recovery-kit', action='store_true', help='Also build the optional Recovery fallback; requires Xcode Command Line Tools')
     parser.add_argument('--assets-pkg', type=Path)
     parser.add_argument('--kdk-pkg', type=Path)
     parser.add_argument('--cache', type=Path, default=builder.BASE / 'build/downloads')
@@ -163,14 +173,16 @@ def main(argv=None):
     config_before = config.read_bytes()
     fix_efi.update_config(plistlib.loads(config_before), normal_boot=True)
     if args.check:
-        audit(usb, partition, config)
-        print('PASS: USB assets, KDK, kit, permissions, EFI paths, model and normal boot settings verified.')
+        audit(usb, partition, config, recovery_kit=args.with_recovery_kit)
+        print('PASS: installer packages, permissions, EFI paths, model and normal boot verified'
+              + ('; Recovery kit verified.' if args.with_recovery_kit else '.'))
         return
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     run_dir = builder.BASE / 'build/runs' / stamp
     run_dir.mkdir(parents=True)
     report = {'model': builder.MODEL, 'build': builder.BUILD, 'usb_partition': partition,
-              'status': 'incomplete', 'steps': [], 'full_reinstall_required_in_reported_case': True}
+              'status': 'incomplete', 'steps': [],
+              'mode': 'installer-and-recovery-kit' if args.with_recovery_kit else 'installer-only', 'full_reinstall_required_in_reported_case': True}
     platform_before = plistlib.loads(config_before)['PlatformInfo']
     report['efi_before'] = {
         'SystemProductName': platform_before['DataHub'].get('SystemProductName'),
@@ -201,14 +213,18 @@ def main(argv=None):
 
         log('Preparing ' + builder.MODEL + ' / ' + builder.BUILD + '; USB logs: ' + str(usb_log_dir))
         try:
-            verify_payloads(usb, partition)
-            log('Existing pinned packages and complete kit verify; reusing them.')
+            verify_installer(usb)
+            if args.with_recovery_kit:
+                verify_payloads(usb, partition)
+            log('Existing selected payloads verify; reusing them.')
             report['steps'].append('verified-existing-payloads')
         except (OSError, ValueError) as reason:
             log('Preparing missing or changed payloads: ' + str(reason))
             output = run_dir / 'USB-Kit'
             command = [sys.executable, str(builder.BASE / 'build_kit.py'), '--usb', str(usb),
                        '--download', '--cache', str(cache), '--output', str(output)]
+            if not args.with_recovery_kit:
+                command.append('--installer-only')
             for option, supplied, relative, expected in [
                 ('--assets-pkg', args.assets_pkg, 'Library/Packages/AutoPkg-Assets.pkg', builder.ASSETS_SHA),
                 ('--kdk-pkg', args.kdk_pkg, 'Library/Packages/KDK.pkg', builder.KDK_PKG_SHA),
@@ -229,18 +245,18 @@ def main(argv=None):
             fix_efi.validate_config(usb, config)
             if config.read_bytes() != config_before:
                 raise ValueError('EFI config changed during preparation; no deployment performed.')
-            builder.deploy(output, usb, backup_dir=run_dir / 'usb-backups')
-            report['steps'].append('deployed-verified-kit-with-host-backups')
+            builder.deploy(output, usb, backup_dir=run_dir / 'usb-backups', recovery_kit=args.with_recovery_kit)
+            report['steps'].append('deployed-selected-payloads-with-host-backups')
         assert_same_usb(usb, partition)
         fix_efi.validate_config(usb, config)
         backup = fix_efi.apply_config(config, normal_boot=True, expected_bytes=config_before)
         report['efi_backup'] = str(backup) if backup else None
-        permissions(usb, repair=True)
-        audit(usb, partition, config)
+        permissions(usb, repair=True, recovery_kit=args.with_recovery_kit)
+        audit(usb, partition, config, recovery_kit=args.with_recovery_kit)
         report['status'] = 'verified'
         report['steps'].extend(['verified-efi-and-normal-boot', 'normalized-permissions', 'final-audit-passed'])
         report['efi_after'] = {'SystemProductName': builder.MODEL, 'BoardProduct': fix_efi.BOARD, 'UpdateDataHub': True}
-        log('The owner still needed to erase the internal drive and reinstall Tahoe AFTER all USB changes.')
+        log('Next: eject the USB and follow the README installation steps.')
         log('This command does not erase the internal disk, install macOS, or guarantee a successful boot.')
     except Exception as exc:
         report['status'] = 'incomplete'
