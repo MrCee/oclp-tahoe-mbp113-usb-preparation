@@ -5,6 +5,6 @@ xcrun clang -arch x86_64 -mmacosx-version-min=10.13 -O2 -Wall -Wextra -Werror \
   -Wno-deprecated-declarations -framework CoreFoundation kit/recovery-tool.c -o kit/recovery-tool
 codesign --force --sign - kit/recovery-tool
 for file in kit/*.sh; do /bin/bash -n "$file"; done
-python3 -m unittest discover -s tests -p test_preparation.py -v
+python3 -m unittest discover -s tests -p 'test_prepar*.py' -v
 python3 tests/test_repair.py
 python3 tests/test_recovery_stage.py

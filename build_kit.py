@@ -153,7 +153,7 @@ def assemble(output, partition, assets, kdk_pkg, work):
     run([kit / "recovery-tool", "sha-check", "MBP113-Repair/SHA256SUMS"], cwd=str(output))
 
 
-def deploy(output, usb):
+def deploy(output, usb, backup_dir=None):
     # Only these explicitly documented paths are written. The installer app,
     # shared-support image, EFI, and other volumes are never replaced here.
     for relative in ["MBP113-Repair", "repair.sh", "Library", "Library/Packages",
@@ -161,26 +161,68 @@ def deploy(output, usb):
         if (usb / relative).is_symlink():
             raise ValueError("Refusing a symlinked USB destination: " + relative)
     kit = usb / "MBP113-Repair"
-    if kit.exists() or (usb / "repair.sh").exists():
+    if backup_dir is None and (kit.exists() or (usb / "repair.sh").exists()):
         raise ValueError("A recovery kit already exists on the USB. Preserve it before deploying another version.")
     for relative in ["Library/Packages/AutoPkg-Assets.pkg", "Library/Packages/KDK.pkg", "KDK-25G241.tar.gz"]:
         src, dest = output / relative, usb / relative
-        if dest.exists() and (not dest.is_file() or digest(dest) != digest(src)):
+        if dest.exists() and not dest.is_file():
+            raise ValueError("Unexpected non-file USB destination: " + str(dest))
+        if backup_dir is None and dest.exists() and digest(dest) != digest(src):
             raise ValueError("Existing USB file differs; refusing to overwrite: " + str(dest))
-    needed = sum(p.stat().st_size for p in output.rglob("*") if p.is_file() and not (usb / p.relative_to(output)).exists())
+    if backup_dir is not None:
+        backup_dir = Path(backup_dir).resolve()
+        if backup_dir == usb or usb in backup_dir.parents:
+            raise ValueError("Existing-kit backups must be on the host, outside the USB.")
+    source_files = sorted((p for p in output.rglob("*") if p.is_file()),
+                          key=lambda p: (p.name == "SHA256SUMS", str(p)))
+    changed_files = [p for p in source_files if not (usb / p.relative_to(output)).is_file()
+                     or digest(p) != digest(usb / p.relative_to(output))]
+    for src in changed_files:
+        for parent in (usb / src.relative_to(output)).parents:
+            if parent == usb:
+                break
+            if parent.exists() and not parent.is_dir():
+                raise ValueError("Unexpected non-directory destination parent: " + str(parent))
+            if parent.is_symlink():
+                raise ValueError("Refusing symlinked destination parent: " + str(parent))
+        dest = usb / src.relative_to(output)
+        if dest.exists() and not dest.is_file():
+            raise ValueError("Unexpected non-file destination: " + str(dest))
+        if dest.is_symlink():
+            raise ValueError("Refusing symlinked destination: " + str(src.relative_to(output)))
+    # Atomic replacement needs free room for the largest temporary file plus
+    # any net growth. Existing changed files are copied to the host first.
+    needed = max((p.stat().st_size for p in changed_files), default=0)
+    needed += sum(max(0, p.stat().st_size - ((usb / p.relative_to(output)).stat().st_size
+                   if (usb / p.relative_to(output)).exists() else 0)) for p in changed_files)
     if shutil.disk_usage(usb).free < needed + 64 * 1024 * 1024:
         raise ValueError("Not enough free space on USB for kit plus logging reserve.")
-    for relative in ["Library/Packages/AutoPkg-Assets.pkg", "Library/Packages/KDK.pkg", "KDK-25G241.tar.gz"]:
-        src, dest = output / relative, usb / relative
-        if not dest.exists():
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest)
-    shutil.copytree(output / "MBP113-Repair", kit)
-    shutil.copy2(output / "repair.sh", usb / "repair.sh")
-    run([kit / "recovery-tool", "sha-check", "MBP113-Repair/SHA256SUMS"], cwd=str(usb))
+    if backup_dir is not None:
+        backup_dir.mkdir(parents=True, exist_ok=False)
+        to_backup = [usb / p.relative_to(output) for p in changed_files if (usb / p.relative_to(output)).exists()]
+        if shutil.disk_usage(backup_dir).free < sum(p.stat().st_size for p in to_backup) + 64 * 1024 * 1024:
+            raise ValueError("Not enough host space to preserve existing USB files.")
+        for old in to_backup:
+            saved = backup_dir / old.relative_to(usb)
+            saved.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(old, saved)
+    for src in changed_files:
+        dest = usb / src.relative_to(output)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp = tempfile.mkstemp(prefix=".mbp113-", dir=str(dest.parent))
+        os.close(fd)
+        try:
+            shutil.copy2(src, temp)
+            if digest(temp) != digest(src):
+                raise ValueError("USB temporary-file verification failed: " + str(dest))
+            os.replace(temp, dest)
+        finally:
+            if os.path.exists(temp):
+                os.unlink(temp)
+    run([output / "MBP113-Repair/recovery-tool", "sha-check", "MBP113-Repair/SHA256SUMS"], cwd=str(usb))
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--usb", required=True, type=Path, help="Mounted external Tahoe 26.7.1 installer volume")
     parser.add_argument("--assets-pkg", type=Path)
@@ -189,7 +231,7 @@ def main():
     parser.add_argument("--cache", type=Path, default=BASE / "build/downloads")
     parser.add_argument("--output", type=Path, default=BASE / "build/USB-Kit")
     parser.add_argument("--deploy", action="store_true", help="Also copy the verified kit to the selected USB")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     usb, partition = validate_usb(args.usb)
     output = args.output.resolve()
     # Keep multi-GB expanded/generated payloads off the installer USB.

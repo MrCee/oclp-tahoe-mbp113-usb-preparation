@@ -55,6 +55,8 @@ The matching Apple **KDK_26.7.1_25G241.kdk** was supplied offline. OCLP's RC3 ap
 | Was `Universal-Binaries.dmg` unmounting an error? | The unmount line was cleanup; the missing dependency and skipped graphics were the useful evidence. |
 | Was a separate MetallibSupportPkg added? | No. The RC3 source predicates for Haswell/Kepler do not require that package on Tahoe; do not generalize Sequoia advice to this case. |
 
+RC3's [installer creation code](https://github.com/dortania/OpenCore-Legacy-Patcher/blob/3.0.0-rc.3/opencore_legacy_patcher/wx_gui/gui_macos_installer_flash.py#L443-L481) supplies the assets package and chainloads `KDK.pkg` under the USB's `Library/Packages/`. The [official RC3 announcement](https://discord.com/channels/417165963327176704/1389230559674368062/1557563105897226298) separately documents broken auto patching and manual assets placement. These corroborate the offline installer-package workaround; they do not isolate what caused this machine's eventual success. The public `prepare_usb.py` now coordinates package placement, Recovery kit preparation, EFI correction and final audit in one working-Mac command.
+
 Sources: [RC3 release](https://github.com/dortania/OpenCore-Legacy-Patcher/releases/tag/3.0.0-rc.3), [matching KDK](https://github.com/dortania/KdkSupportPkg/releases/tag/25G241), [Haswell patch definition](https://github.com/dortania/OpenCore-Legacy-Patcher/blob/3.0.0-rc.3/opencore_legacy_patcher/sys_patch/patchsets/hardware/graphics/intel_haswell.py), [Kepler patch definition](https://github.com/dortania/OpenCore-Legacy-Patcher/blob/3.0.0-rc.3/opencore_legacy_patcher/sys_patch/patchsets/hardware/graphics/nvidia_kepler.py).
 
 ## 5. Recovery needed an offline staging route
