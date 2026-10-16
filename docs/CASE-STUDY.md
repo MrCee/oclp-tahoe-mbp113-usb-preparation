@@ -1,6 +1,6 @@
 # From a Lilu loop to completed Tahoe setup
 
-**Final outcome reported by the owner:** Tahoe is working and first-user setup is complete.
+**Final outcome reported by the owner:** Tahoe is working and first-user setup is complete **after erasing the internal drive again and doing a full reinstall from the fully modified USB**. The earlier installation remained unusable despite KDK staging and repair attempts. The final clean reinstall is an essential part of the reported sequence.
 
 This record describes one mid-2014 15-inch **MacBookPro11,3**, with Intel Iris Pro (Haswell) and NVIDIA GeForce GT 750M (Kepler), using **OCLP 3.0.0 RC3** and **Tahoe 26.7.1, build 25G241**. The internal disk had been wiped. The USB supplied the working OpenCore EFI during recovery. No working user session existed when the repair was prepared.
 
@@ -61,7 +61,7 @@ Sources: [RC3 release](https://github.com/dortania/OpenCore-Legacy-Patcher/relea
 
 Recovery lacked `sudo` and `pkgutil`; it already ran a root shell. Trying to install the KDK package against the read-only System volume did not provide a usable route. These failed commands are not required steps.
 
-The working approach prepared verified archives on the functioning iMac, then extracted the KDK into the installation's paired, writable **Data volume** under `Library/Developer/KDKs/`. The RC3 runtime was staged on that same Data volume. Both KDK and SDK payloads are included in the public builder.
+The offline staging approach prepared verified archives on the functioning iMac, then extracted the KDK into the installation's paired, writable **Data volume** under `Library/Developer/KDKs/`. The RC3 runtime was staged on that same Data volume. Both KDK and SDK payloads are included in the public builder. This staging did not by itself make the earlier installation usable; the later clean reinstall still mattered.
 
 A small native C utility replaced assumptions about Python, Perl or modern plist command options being available in Recovery. It reads XML/binary plists, calculates SHA-256 and reports free space. The actual patching still belongs to OCLP.
 
@@ -73,11 +73,11 @@ This was a bug in the custom helper, not evidence of an OCLP USB-permissions bug
 
 Removing and reattaching the USB without restarting Recovery also left both an older `Image Volume` mount and the newer installer mount visible. Running a wildcard script path supplied the second script as an argument to the first, so the options screen kept appearing. An exact quoted path to the updated script fixed that invocation mistake.
 
-## 7. OCLP was launched before user setup
+## 7. A pre-login root-patch launcher was staged
 
 The final staging script validated the model, installed build, target APFS volume group and USB identity. It preserved relevant logs and previous app/helper files, staged the matching KDK and authentic RC3 runtime, then installed a one-attempt startup job.
 
-On the next **normal** internal-system boot through **USB EFI Boot**, that job invoked RC3's `--patch_sys_vol` command without depending on a user account, Dock or Spotlight. It kept local logs and live USB logs, falling back to the same USB's EFI if necessary.
+The job was configured to invoke RC3's `--patch_sys_vol` command on the next **normal** internal-system boot through **USB EFI Boot**, without depending on a user account, Dock or Spotlight. It records local and live USB logs, falling back to the same USB's EFI if necessary. This describes the launcher's design; it is not evidence that this step alone fixed the owner's existing installation.
 
 Automatic completion required all of:
 
@@ -88,11 +88,24 @@ Automatic completion required all of:
 
 Only then would the job disable itself and restart once. Failures retained evidence without an automatic patch/reboot loop. It did not create an account, bypass Setup Assistant, erase the disk, install an internal OpenCore EFI, or invent additional root patches.
 
-The owner subsequently confirmed a working Tahoe installation and completed user setup. No post-success performance benchmark, GPU-switching test, sleep/wake qualification or update test has been claimed.
+## 8. Final successful step: erase and reinstall from the modified USB
+
+The owner clarified that **the earlier installation still showed the unusable desktop after the KDK was installed and the USB/recovery changes were made**. They initially expected those changes to be enough, but they were not.
+
+The successful order was:
+
+1. Finish the USB EFI changes and offline dependency preparation.
+2. Erase the internal drive again.
+3. Run a full Tahoe installation from that fully modified USB.
+4. Complete first-user setup and reach a working desktop.
+
+The reported result must therefore include the clean reinstall. It should not be summarized as “copy the KDK, run the script and the original installation is fixed.” Erasing removes existing data, so a reader reproducing that route must preserve a backup first. This is the owner's observed result, not a universal requirement for every Mac or proof of exactly how the installer used each staged component.
+
+No post-success performance benchmark, GPU-switching test, sleep/wake qualification or update test has been claimed.
 
 ## What to reproduce, and what to leave as history
 
-The [README](../README.md) presents the final preparation and Recovery sequence. The failed Recovery package installation, duplicate mounts, original UUID assumption and repeated attempts to launch tools from the unusable setup screen are history, not additional repairs to repeat.
+The [README](../README.md) presents USB preparation followed by the successful clean-reinstall sequence, with the custom Recovery helper documented separately. The failed Recovery package installation, duplicate mounts, original UUID assumption and repeated attempts to launch tools from the unusable setup screen are history, not additional repairs to repeat.
 
 There is no established “wait exactly 30 minutes” requirement. Progress should be judged from logs and a successful user session, not wallpaper or an arbitrary delay.
 

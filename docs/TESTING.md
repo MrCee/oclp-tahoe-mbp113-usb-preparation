@@ -4,7 +4,9 @@ The original hardware result and the public packaging tests answer different que
 
 ## Physical-machine result
 
-The owner confirmed that the original private recovery workflow produced a working Tahoe installation and completed user setup on a **mid-2014 MacBookPro11,3**. The public source preserves its recovery/staging logic, replaces the private USB identity with a creator-time binding, and uses the neutral service label `local.mbp113-repair`.
+The owner confirmed a working Tahoe installation and completed user setup on a **mid-2014 MacBookPro11,3 only after erasing the internal drive again and reinstalling Tahoe from the fully modified USB**. KDK staging and repair attempts on the earlier installation had left it unusable. The public source preserves the recovery/staging logic, replaces the private USB identity with a creator-time binding, and uses the neutral service label `local.mbp113-repair`.
+
+The automated launcher/staging checks below verify script behavior. They do not demonstrate that the script alone repaired the original installation, or that a clean reinstall is universally required.
 
 The public packaging has not been run on a second physical Mac. There are no claimed performance, sleep/wake, GPU switching or future-update results. The sequence was not repeated with each dependency removed individually.
 

@@ -9,9 +9,12 @@
 
 The original clean installation stopped at a repeating Lilu model-information message. After the EFI correction, it reached a wallpaper-only screen before a user account could be created. This project records the changes, supplies an offline preparation tool, and stages OCLP's own root patcher to run before login.
 
-**Reported outcome:** the owner subsequently confirmed that Tahoe works and first-user setup is complete. This is one machine's successful troubleshooting sequence, not proof that every change was essential or that other models will behave the same way.
+**Reported outcome:** Tahoe works and first-user setup is complete **after a clean reinstall from the fully modified USB**. The owner confirmed that the internal drive was erased again first. Supplying the KDK and attempting repairs on the earlier installation had left the unusable setup screen in place. The erase and reinstall were the final successful step in this case.
 
-[What fixed what](#what-fixed-what) · [Prepare the USB](#prepare-the-usb) · [Run in Recovery](#run-in-recovery) · [Logs and rollback](#logs-and-rollback) · [Full troubleshooting record](docs/CASE-STUDY.md)
+> [!IMPORTANT]
+> **The final reinstall matters:** complete the USB changes and offline dependency preparation **before** reinstalling. This case did not succeed merely by adding KDK files and rebooting the existing installation. Erasing the internal drive deletes its data; preserve a backup first. This is one machine's observed recovery sequence, not proof that every affected Mac requires an erase.
+
+[What fixed what](#what-fixed-what) · [Prepare the USB](#prepare-the-usb) · [Clean reinstall from the modified USB](#clean-reinstall-from-the-modified-usb) · [Recovery helper](#run-in-recovery) · [Logs and rollback](#logs-and-rollback) · [Full troubleshooting record](docs/CASE-STUDY.md)
 
 > [!IMPORTANT]
 > This is an **unofficial, model-specific helper**, not an OCLP fork or an official Dortania release. It modifies the installed system through OCLP's root-patching process. Its guards intentionally accept **MacBookPro11,3 + Tahoe 26.7.1 build 25G241 + OCLP 3.0.0 RC3** only. Review the source and preserve a backup before using it.
@@ -22,7 +25,8 @@ The original clean installation stopped at a repeating Lilu model-information me
 | :--- | :--- | :--- |
 | Repeating `Lilu dev: failed to obtain model information, retrying...` | Set explicit DataHub model and board ID; enable `UpdateDataHub` | The owner reported that this cleared the Lilu boot loop. Exact prefix punctuation was not captured reliably. |
 | Installer patch log could not find a matching KDK and selected wireless-only patches | Supply the exact **25G241 KDK** offline | The log showed a real missing dependency. Offline availability removes that network dependency. |
-| Wallpaper appears, but no usable Setup Assistant, Dock, or menu bar | Stage a one-attempt startup job to invoke RC3 `--patch_sys_vol` before login | The workflow avoids needing an existing account or a working graphical launcher. The owner's final report confirms completed setup. |
+| Wallpaper appears, but no usable Setup Assistant, Dock, or menu bar | Finish the USB changes, then **erase the internal drive again and reinstall Tahoe from that USB** | The owner confirms the existing installation stayed unusable despite KDK staging/repair attempts. Working setup followed the clean reinstall. |
+| Need to invoke OCLP without a working user session | Stage a one-attempt startup job to invoke RC3 `--patch_sys_vol` before login | This is the custom helper's function. It was not demonstrated to recover the original installation by itself. |
 | Custom helper rejects the correct USB in Recovery | Match the **GPT partition UUID**, rather than requiring an HFS filesystem UUID | Recovery reported the partition identity while omitting filesystem identity. This was a bug in the custom helper. |
 | Installer volume is mounted read-only | Try a writable source mount; otherwise log to the **same USB's EFI** | No formatting or repartitioning is involved. The target system is not force-remounted by the helper. |
 | A wildcard command prints the options instead of running | Use one exact, quoted script path | Both an old `Image Volume` mount and an updated installer mount were visible. The wildcard passed the second script path as an argument. |
@@ -41,23 +45,19 @@ These are different dependencies, not competing fixes:
 
 The assets file does not itself fix graphics. The KDK does not contain OCLP's graphics patches. **The patcher resources and a usable matching KDK work together.** With working networking, OCLP can normally acquire dependencies itself; this case required offline staging. An already installed RC3 app could be another way to supply the app, but this helper deliberately uses a pinned, complete runtime.
 
-Several changes were made before the final successful result, so this record does **not** establish that every manual copy was individually necessary.
+The owner had already supplied the KDK during the unsuccessful repair attempts. Success came only after erasing and reinstalling from the fully modified USB. This does **not** establish the exact installer/root-patcher mechanism, or that every manual copy was individually necessary.
 
-## How the workflow fits together
+## Reported path to working setup
 
 ```mermaid
 flowchart TD
     A[Working Mac: build OCLP installer for MacBookPro11,3] --> B[Verify and prepare offline files]
     B --> C[Apply the documented USB DataHub correction]
-    C --> D[Boot USB EFI, then Tahoe installer Recovery]
-    D --> E[Run repair.sh: validate model, build and paired Data volume]
-    E --> F[Stage RC3 app, matching KDK and one-attempt startup job]
-    F --> G[Restart through USB EFI to internal MacIntosh]
-    G --> H[OCLP CLI applies root patches before login]
-    H --> I{Completion plus both graphics patchsets logged?}
-    I -->|Yes| J[Disable custom job and restart once]
-    I -->|No| K[Retain logs; stop without automatic retry]
-    J --> L[Boot internal system through USB EFI; complete Setup Assistant]
+    C --> D[KDK staging and recovery attempts on old install still left unusable setup]
+    D --> E[Back up, then erase the internal installation again]
+    E --> F[Run full Tahoe installation from the fully modified USB]
+    F --> G[Continue installation through USB OpenCore EFI]
+    G --> H[Complete first-user setup and verify working desktop]
 ```
 
 ## Prepare the USB
@@ -139,9 +139,21 @@ The board ID is the shared **MacBookPro11,3 model identifier**, not an ID copied
 
 This checks the manifest, native utility and service plist, and creates a diagnostic log. It does not stage changes on internal macOS. Safely eject the USB when checks pass.
 
+## Clean reinstall from the modified USB
+
+**This was the final step that succeeded on the owner's Mac.** The earlier installation remained unusable after the offline KDK had been supplied and the repair attempts had run. Rebooting that same installation was not sufficient.
+
+1. Complete **all USB preparation first**: the correct OCLP model target, DataHub correction, offline RC3/KDK files, removal of temporary `-x`, and the prepared-kit checks above.
+2. Back up any data to preserve. The owner then **erased the internal drive again** in Disk Utility. This is destructive; identify the intended internal target carefully and retain the prepared USB.
+3. Boot **Option → USB EFI Boot → Install macOS Tahoe** and run a **full Tahoe installation onto the erased internal target**, using the fully modified USB.
+4. During installation restarts, continue through the USB's OpenCore EFI. Select the continuing installation entry when present, then the internal macOS entry once installation is complete. Keep the USB connected while it supplies OpenCore.
+5. Boot normally, complete first-user setup and confirm a usable desktop. This was the owner's successful result after the clean reinstall.
+
+This records the sequence that worked on one machine. It does not prove every affected Mac needs an erase, or that a KDK copied to the USB is automatically consumed by every installer path. The helper's explicit staging route is described below; its presence alone was not sufficient to rescue the owner's earlier installation.
+
 ## Run in Recovery
 
-These repair steps require Tahoe **26.7.1 / 25G241 to be installed on the internal disk already**. For an erased Mac, first install Tahoe using the prepared USB. If installation reaches the unusable setup screen described above, return to USB installer Recovery and continue here. The recovery helper stages dependencies and root patching; it does not install macOS.
+**Additional helper route, not a replacement for the clean reinstall reported above.** These script steps require Tahoe **26.7.1 / 25G241 to be installed on the internal disk already**. They describe how to stage dependencies and invoke OCLP when a graphical session is unavailable. The helper does not erase the disk or install macOS. Running it on the owner's previous installation did not, by itself, produce the working result.
 
 Connect the laptop's charger and leave the USB inserted.
 
@@ -162,7 +174,7 @@ Connect the laptop's charger and leave the USB inserted.
 4. The script stages its files and restarts after a short notice. Choose **USB EFI Boot → internal MacIntosh** (or your internal volume's actual name). Use a **normal boot**, without Shift.
 5. The startup job invokes the official RC3 `--patch_sys_vol` command before login. A user account, Dock, Spotlight and Terminal on the broken setup screen are not required.
 6. The custom job automatically disables itself and restarts once only after a zero patcher exit, successful logging, OCLP's completion message, and execution of **both Intel Haswell and NVIDIA Kepler patchsets**.
-7. Choose **USB EFI Boot → internal MacIntosh** again and complete Setup Assistant. A working user session is the meaningful success check.
+7. Choose **USB EFI Boot → internal MacIntosh** again and check whether Setup Assistant and the desktop are usable. Script completion alone does not establish recovery. In the owner's case, a subsequent erase and full reinstall from the modified USB was still required.
 
 > [!TIP]
 > If the USB was removed and reattached while Recovery stayed open, an old mount may remain visible. Before running anything, identify the copies:
