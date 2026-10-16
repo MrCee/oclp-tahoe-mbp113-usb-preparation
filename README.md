@@ -43,10 +43,12 @@ If you already cloned the repo, open that folder and run `git pull --ff-only` in
 **The command automatically:**
 
 - Finds the EFI on that same external USB, recognises OCLP's Apple or UEFI boot layout, and checks the target model and referenced boot files. A read-only EFI is remounted normally when needed; a busy or protected volume stops with guidance.
-- Downloads and verifies the pinned official **RC3 `AutoPkg-Assets.pkg`** and matching **`KDK.pkg`**, then copies them into the USB's **`Library/Packages/`**. Correct copies are reused; changed managed files are backed up before replacement.
+- Downloads with a scrolling progress bar, percentage, speed and estimated time, and verifies the pinned official **RC3 `AutoPkg-Assets.pkg`** and matching **`KDK.pkg`**, then copies them into the USB's **`Library/Packages/`**. Correct copies are reused; changed managed files are backed up before replacement.
 - Backs up `config.plist`, sets DataHub `SystemProductName` to `MacBookPro11,3`, `BoardProduct` to `Mac-2BD1B31983FE1663`, and `UpdateDataHub` to `true`.
 - Removes temporary `-x` Safe Boot and ensures OpenCore replaces saved `boot-args`; other boot arguments are retained.
-- Checks write access before downloading, shows four preparation stages, sets package permissions and verifies the result. Logs and reports include the detected layout, backup locations, and the next step if preparation stops.
+- Checks write access before downloading, shows four preparation stages and progress while copying and checking large files, sets package permissions and verifies the result. Logs and reports include the detected layout, backup locations, and the next step if preparation stops.
+
+A missing `Library/Packages` folder on a fresh USB is expected: the command creates it and supplies the packages automatically.
 
 **Wait for `PASS: supported USB preparation and report saving complete.`** If the command stops with an error, keep the logs and resolve that error before using the USB. It is safe to rerun; completed matching work is reused. Rebuilding OpenCore afterward may overwrite the EFI corrections, so run this step last.
 

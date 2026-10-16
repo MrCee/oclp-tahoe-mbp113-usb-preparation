@@ -168,6 +168,9 @@ def next_actions(error):
     if 'sha-256' in message or 'checksum' in message:
         return ['Keep the reported file for inspection and use the exact official package linked in the README.',
                 'Do not bypass checksum verification; rerun with a verified local package or corrected cache.']
+    if any(term in message for term in ['download', 'urlopen', 'timed out', 'network', 'http error', 'dns', 'ssl']):
+        return ['Check internet access and rerun; completed verified downloads are reused.',
+                'If downloading remains unavailable, supply the pinned official packages with --assets-pkg and --kdk-pkg as shown in the README.']
     if 'space' in message:
         return ['Free space on the volume named in the error, retain backups, and rerun the same command.']
     if 'xcode' in message or 'clang' in message or 'xcrun' in message:
@@ -324,7 +327,13 @@ def main(argv=None):
         except (OSError, ValueError) as reason:
             check_build_tools(args.with_recovery_kit)
             report['phase'] = 'packages'
-            log('[2/4] Preparing missing or changed packages: ' + str(reason))
+            report['payload_preparation_reason'] = str(reason)
+            if isinstance(reason, FileNotFoundError):
+                status = ('Required installer packages or optional kit files are missing.' if args.with_recovery_kit
+                          else 'Installer packages are missing.')
+            else:
+                status = 'Existing selected files need replacement.'
+            log('[2/4] ' + status + ' Preparing verified official copies automatically.')
             output = run_dir / 'USB-Kit'
             command = [sys.executable, str(builder.BASE / 'build_kit.py'), '--usb', str(usb),
                        '--download', '--cache', str(cache), '--output', str(output)]
@@ -353,6 +362,7 @@ def main(argv=None):
             fix_efi.validate_config(usb, config)
             if config.read_bytes() != config_before:
                 raise ValueError('EFI config changed during preparation; no deployment performed.')
+            log('[2/4] Downloads and package checks complete. Backing up, copying and verifying files on USB; this can take a few minutes.')
             builder.deploy(output, usb, backup_dir=run_dir / 'usb-backups', recovery_kit=args.with_recovery_kit)
             report['steps'].append('deployed-selected-payloads-with-host-backups')
         assert_same_usb(usb, partition)

@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
 import urllib.request
 import uuid
 
@@ -37,10 +38,23 @@ DOWNLOADS = {
 
 
 def digest(path):
+    path = Path(path)
     h = hashlib.sha256()
-    with Path(path).open("rb") as f:
+    total = path.stat().st_size
+    show_progress = total >= 32 * 1024 ** 2
+    started = last_update = time.monotonic()
+    received = 0
+    if show_progress:
+        print(download_status('Checking ' + path.name, 0, total, 0), flush=True)
+    with path.open("rb") as f:
         for block in iter(lambda: f.read(1024 * 1024), b""):
             h.update(block)
+            received += len(block)
+            if show_progress and time.monotonic() - last_update >= 2:
+                print(download_status('Checking ' + path.name, received, total, time.monotonic() - started), flush=True)
+                last_update = time.monotonic()
+    if show_progress:
+        print(download_status('Checking ' + path.name, received, total, time.monotonic() - started), flush=True)
     return h.hexdigest()
 
 
@@ -74,6 +88,23 @@ def validate_usb(path):
     return path, partition
 
 
+def download_status(name, received, total, elapsed):
+    """A newline-friendly bar remains readable in Terminal and saved logs."""
+    mib = received / 1024 ** 2
+    rate = mib / elapsed if elapsed > 0 else 0
+    speed = f'{rate:.1f} MiB/s' if received and elapsed > 0 else '-- MiB/s'
+    if total:
+        fraction = min(1, received / total)
+        filled = int(fraction * 24)
+        bar = '#' * filled + '-' * (24 - filled)
+        seconds = max(0, int((total - received) / (rate * 1024 ** 2))) if rate else None
+        eta = f'{seconds // 60}:{seconds % 60:02d}' if seconds is not None else '--:--'
+        return f'  {name} [{bar}] ({fraction * 100:.0f}%) {mib:.1f}/{total / 1024 ** 2:.1f} MiB | {speed} | ETA {eta}'
+    position = int(elapsed) % 22
+    bar = ' ' * position + '>>>' + ' ' * (22 - position)
+    return f'  {name} [{bar}] {mib:.1f} MiB received | {speed} | total size unknown'
+
+
 def download(name, cache):
     url, expected = DOWNLOADS[name]
     cache.mkdir(parents=True, exist_ok=True)
@@ -84,9 +115,31 @@ def download(name, cache):
     fd, tmp = tempfile.mkstemp(prefix=name + ".", suffix=".part", dir=str(cache))
     try:
         with os.fdopen(fd, "wb") as out, urllib.request.urlopen(url, timeout=120) as response:
-            shutil.copyfileobj(response, out, length=1024 * 1024)
+            header = response.headers.get("Content-Length", "")
+            total = int(header) if header.isdigit() and int(header) > 0 else None
+            received = 0
+            started = last_update = time.monotonic()
+
+            def progress():
+                print(download_status(name, received, total, time.monotonic() - started), flush=True)
+
+            progress()
+            while True:
+                block = response.read(64 * 1024)
+                if not block:
+                    break
+                out.write(block)
+                received += len(block)
+                if time.monotonic() - last_update >= 2:
+                    progress()
+                    last_update = time.monotonic()
+            if total is not None and received != total:
+                raise ValueError(f"Incomplete download of {name}: received {received} of {total} bytes. Rerun to retry.")
+            progress()
+        print("Download received; checking SHA-256:", name, flush=True)
         require_hash(tmp, expected)
         os.replace(tmp, dest)
+        print("Verified official download:", name, flush=True)
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -151,6 +204,26 @@ def assemble(output, partition, assets, kdk_pkg, work):
     manifest = "".join(digest(p) + "  " + p.relative_to(output).as_posix() + "\n" for p in files)
     (kit / "SHA256SUMS").write_text(manifest)
     run([kit / "recovery-tool", "sha-check", "MBP113-Repair/SHA256SUMS"], cwd=str(output))
+
+
+def copy_with_progress(source, destination):
+    source, destination = Path(source), Path(destination)
+    total = source.stat().st_size
+    if total < 32 * 1024 ** 2:
+        shutil.copy2(source, destination)
+        return
+    started = last_update = time.monotonic()
+    copied = 0
+    print(download_status('Copying ' + source.name, 0, total, 0), flush=True)
+    with source.open('rb') as input_file, destination.open('wb') as output_file:
+        for block in iter(lambda: input_file.read(1024 * 1024), b''):
+            output_file.write(block)
+            copied += len(block)
+            if time.monotonic() - last_update >= 2:
+                print(download_status('Copying ' + source.name, copied, total, time.monotonic() - started), flush=True)
+                last_update = time.monotonic()
+    shutil.copystat(source, destination)
+    print(download_status('Copying ' + source.name, copied, total, time.monotonic() - started), flush=True)
 
 
 def deploy(output, usb, backup_dir=None, recovery_kit=True):
@@ -223,7 +296,7 @@ def deploy(output, usb, backup_dir=None, recovery_kit=True):
         fd, temp = tempfile.mkstemp(prefix=".mbp113-", dir=str(dest.parent))
         os.close(fd)
         try:
-            shutil.copy2(src, temp)
+            copy_with_progress(src, temp)
             if digest(temp) != digest(src):
                 raise ValueError("USB temporary-file verification failed: " + str(dest))
             os.replace(temp, dest)

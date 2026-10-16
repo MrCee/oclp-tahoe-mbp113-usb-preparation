@@ -60,7 +60,8 @@ class UsbFixtures:
                 return subprocess.run([str(a) for a in args], check=True, **kwargs)
         self.stack.enter_context(patch.object(builder, 'run', side_effect=native_run))
         self.child = self.stack.enter_context(patch.object(prepare.subprocess, 'Popen', side_effect=self.fake_build))
-        self.stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+        self.output = io.StringIO()
+        self.stack.enter_context(contextlib.redirect_stdout(self.output))
 
     @staticmethod
     def hash_bytes(data):
@@ -395,6 +396,13 @@ class InstallerOnlyTests(UsbFixtures, unittest.TestCase):
         report = json.loads(next((self.usb / 'Repair-Logs').rglob('report.json')).read_text())
         self.assertEqual((report['mode'], report['status']), ('installer-only', 'verified'))
         self.assertEqual(plistlib.loads(self.config.read_bytes())['PlatformInfo']['DataHub']['BoardProduct'], fix_efi.BOARD)
+
+    def test_missing_packages_use_plain_status_and_preserve_details_in_report(self):
+        self.run_prepare()
+        self.assertIn('Installer packages are missing.', self.output.getvalue())
+        self.assertNotIn('[Errno 2]', self.output.getvalue())
+        report = json.loads(next((self.usb / 'Repair-Logs').rglob('report.json')).read_text())
+        self.assertIn('[Errno 2]', report['payload_preparation_reason'])
 
     def test_default_reuses_valid_packages_and_efi_on_repeat_run(self):
         self.packages(self.usb)

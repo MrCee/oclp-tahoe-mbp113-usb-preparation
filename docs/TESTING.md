@@ -12,7 +12,7 @@ The public packaging has not been run on a second physical Mac. There are no cla
 
 ## Automated fixture checks
 
-**2026-10-17 result:** all 71 checks passed on the preparation iMac. Generated test output remains local and ignored.
+**2026-10-17 result:** all 80 checks passed on the preparation iMac. Generated test output remains local and ignored.
 
 Run on a working macOS development machine:
 
@@ -26,8 +26,9 @@ The script builds and ad-hoc signs the x86_64 native utility, checks the Bash sc
 | :--- | ---: | :--- |
 | Creator, EFI and native utility | 10 | Temporary files; mocked disk metadata; native XML/binary plist and SHA-256 operations |
 | Optional Recovery preparation and EFI discovery | 19 | Disposable USB/EFI fixtures; package building mocked, native deployment hashes executed; no real disks |
-| Default installer-only preparation and boot layout detection | 22 | Package/EFI fixtures and real Python deployment; automatic KDK image acquisition mocked; compiler/extraction prohibited |
+| Default installer-only preparation and boot layout detection | 23 | Package/EFI fixtures and real Python deployment; automatic KDK image acquisition mocked; compiler/extraction prohibited |
 | Preparation prerequisites | 2 | Installer-only mode needs no compiler; optional mode reports absent compiler clearly |
+| Download, copy progress and transfer integrity | 8 | Mocked responses; known/unknown sizes, scrolling bar, speed/ETA, large-file hash/copy progress, preserved copy metadata, truncated/corrupt transfers and interruption cleanup |
 | Normal-boot startup job | 13 | Disposable filesystem; disk, patcher, power, signature and reboot commands stubbed |
 | Recovery staging | 5 | Disposable System/Data/USB/EFI fixtures; destructive or hardware commands stubbed |
 
@@ -37,7 +38,7 @@ The EFI tests verify that only the three documented DataHub fields change by def
 
 The optional Recovery preparation checks exercise a fresh kit, incomplete kit repair with backups, reuse and idempotence, normal-boot NVRAM replacement, audit-only operation without file/mode changes, permission repair, same-USB EFI discovery and read-only mounting. They also reject missing enabled kexts, conflicting models, an internal/wrong EFI, nested backup configs, symlink destinations, corrupt/duplicate manifests, download caches on the USB, and disk/config changes during preparation. The package-builder subprocess is replaced with tiny fixtures in these orchestration tests; actual extraction/layout is covered by the real-package check below.
 
-The default installer-only checks verify that only the two pinned packages and scoped EFI settings are prepared; no Recovery archive, helper or daemon is created. They cover local and downloaded packages, read-only KDK mounting and detachment, repair with backups, repeat runs, audit-only operation, and preservation of old optional kit files. Tests fail if package expansion or compilation is invoked by the installer-only builder. Additional checks cover Apple-only, UEFI and combined boot layouts, genuinely missing or empty bootstraps, symlink rejection, read-only EFI remounting without force, busy mounts, changed EFI identities, cleaned-up write probes, and actionable failure reports before downloads. The default audit checks packages and EFI, while `--with-recovery-kit --check` also requires the optional kit.
+The default installer-only checks verify that only the two pinned packages and scoped EFI settings are prepared; no Recovery archive, helper or daemon is created. They cover local and downloaded packages, read-only KDK mounting and detachment, repair with backups, repeat runs, audit-only operation, and preservation of old optional kit files. Tests fail if package expansion or compilation is invoked by the installer-only builder. Additional checks cover Apple-only, UEFI and combined boot layouts, genuinely missing or empty bootstraps, symlink rejection, read-only EFI remounting without force, busy mounts, changed EFI identities, cleaned-up write probes, and actionable failure reports before downloads. Fresh missing packages now produce a normal preparation status rather than an exception-looking message, while retaining the detailed reason in the private report. Download tests verify progress formatting and cleanup without accessing the network. The default audit checks packages and EFI, while `--with-recovery-kit --check` also requires the optional kit.
 
 **These fixtures do not invoke OCLP or root-patch the development Mac.** Stubbing signature and disk commands allows testing the orchestration; it does not replace signature verification and real disk validation during actual preparation.
 
