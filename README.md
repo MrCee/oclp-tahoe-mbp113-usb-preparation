@@ -74,6 +74,8 @@ Use **OCLP 3.0.0 RC3** to create a **Tahoe 26.7.1 / 25G241** installer and build
 
 Preparation requires Python **3.9 or newer**, Xcode Command Line Tools (`xcrun clang`), and approximately **15 GiB of free host storage**. The expanded packages and generated archives stay on the host while being built. A 32 GB installer USB was used in the original case; available space is checked before deployment.
 
+Internet access is required to download any missing official packages; verified local packages can be supplied instead. Python and Xcode Command Line Tools are prerequisites on the working Mac and are not installed automatically by this script.
+
 The native Recovery utility targets Intel x86_64. An Apple silicon preparation Mac also needs the ability to execute that Intel utility during verification; the original preparation host was an Intel iMac.
 
 ### 2. Complete the USB with one command
