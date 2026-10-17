@@ -73,7 +73,7 @@ Once it passes, safely eject the USB and its EFI volume. Package installation on
 3. At each restart, boot through **USB EFI Boot**. Select the continuing **macOS Installer** entry while installation is underway, then **Macintosh HD** (or your internal volume’s name) when installation finishes. Avoid starting a new installation from the USB each time.
 4. Complete user setup. In OCLP, check **Post-Install Root Patch**, apply required patches it reports, and reboot through USB EFI if needed.
 
-**Checkpoint:** you have a usable Tahoe desktop through the USB. **Continue to step 4 before removing it.** The normal route uses no `repair.sh` step.
+**Checkpoint:** you have a usable Tahoe desktop through the USB. **Continue to step 4 before removing it.**
 
 ## 4. Finish OpenCore on the internal drive
 
