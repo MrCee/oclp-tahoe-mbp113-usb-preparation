@@ -8,7 +8,7 @@ The owner confirmed a working Tahoe installation and completed user setup on a *
 
 The automated launcher/staging checks below verify script behavior. They do not demonstrate that the script alone repaired the original installation, or that a clean reinstall is universally required.
 
-**2026-10-17 hardware clarification:** the newly completed installation is usable through USB OpenCore but cannot yet boot without the USB. Independent startup is not confirmed. The README now includes OCLP's internal-drive installation and `finish_install.py` to preserve the model fixes afterward. The helper's PASS is configuration verification only; USB-free firmware startup still requires a physical test.
+**2026-10-17 owner-confirmed boot result:** the newly completed installation initially worked only through USB OpenCore. After installing OpenCore onto the internal drive and running `finish_install.py`, the owner reported that the MacBook booted successfully with the USB disconnected. This confirms the final handover on this one machine. The helper's own PASS remains configuration verification only; the subsequent physical boot was reported separately by the owner. Repeated restart qualification, performance, sleep/wake and GPU switching have not been independently verified.
 
 The public packaging has not been run on a second physical Mac. There are no claimed performance, sleep/wake, GPU switching or future-update results. The sequence was not repeated with each dependency removed individually.
 
@@ -64,6 +64,6 @@ This check uses a disposable test partition identifier and a host output directo
 - The fixture files contain placeholders in place of actual app/kernel binaries. Only the real-package assembly check validates the authentic payload layout.
 - A correct package manifest does not prove a future boot or root patch will succeed. Inspect the generated logs and verify a working user session.
 
-On 2026-10-17, read-only inspection of the owner's freshly created physical USB confirmed the RC3 Apple bootstrap layout at `System/Library/CoreServices/boot.efi`, a MacBookPro11,3 config and all referenced OpenCore files. The corrected preflight accepted that layout without copying or relocating any loader. The owner subsequently reported a completed installation usable through the USB, with independent boot failing. This does not verify internal OpenCore or a USB-free startup.
+On 2026-10-17, read-only inspection of the owner's freshly created physical USB confirmed the RC3 Apple bootstrap layout at `System/Library/CoreServices/boot.efi`, a MacBookPro11,3 config and all referenced OpenCore files. The corrected preflight accepted that layout without copying or relocating any loader. Both installer-package hashes were subsequently verified on the mounted USB. The owner reported a completed installation initially usable only through the USB, then confirmed a USB-free boot after the internal OpenCore installation and `finish_install.py` step described above.
 
 No private machine identifiers or raw owner logs are used as public test fixtures.

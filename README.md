@@ -8,7 +8,7 @@
 
 For the **mid-2014 15-inch MacBook Pro, MacBookPro11,3**, with Intel Iris Pro and NVIDIA GT 750M. This unofficial preparation tool supports **Tahoe 26.7.1 / build 25G241 and OCLP 3.0.0 RC3 only**. A different model or installer build stops preparation.
 
-**Current hardware status:** Tahoe installs and reaches a usable desktop with completed user setup through the USB's OpenCore. The current installation **does not boot without the USB**. Step 4 covers the internal OpenCore handover; its new helper has fixture tests, not a confirmed hardware boot result. Keep the working USB as your fallback.
+**Owner-confirmed hardware result — 2026-10-17:** Tahoe is installed, user setup is complete, and the MacBook now **boots without the USB after OCLP was installed internally and `finish_install.py` was run**. The final internal-EFI step matters: the completed installation still depended on USB OpenCore before it. This is a reported result on one MacBookPro11,3; keep the prepared USB as a fallback.
 
 **Already installed and working with the USB? Go straight to [step 4](#4-finish-opencore-on-the-internal-drive). Do not erase or reinstall Tahoe to fix this boot dependency.**
 
@@ -78,13 +78,26 @@ Do this **on the MacBook Pro**, in its installed Tahoe desktop, while booted thr
 
 1. Open **OCLP 3.0.0 RC3**, confirm **Target Model → MacBookPro11,3**, then choose **Build and Install OpenCore**.
 2. Install to the **internal physical drive containing Tahoe**, then its **EFI partition**. Identify it by its name, capacity and internal status; do not assume a disk number. If OCLP offers a reboot, **wait until the next step is complete**.
-3. On this MacBook, use a current copy of this repo and **Python 3.9 or newer**. If Python is missing, install it from [python.org](https://www.python.org/downloads/macos/) before continuing. If you already cloned the repo here, run `git pull --ff-only` in that folder. Otherwise clone it as in step 2 of this guide. From the repo folder run:
+3. On this MacBook, use a current copy of this repo and **Python 3.9 or newer**. If Git or Python requests Apple's developer tools, run `xcode-select --install`, complete the installation window, then check `python3 --version` and `git --version`. The "install requested" message alone does not mean installation is finished. Python is also available from [python.org](https://www.python.org/downloads/macos/). If you already cloned the repo here, run `git pull --ff-only` in that folder. Otherwise clone it as in step 2 of this guide. From the repo folder run:
 
    ```bash
    sudo python3 finish_install.py
    ```
 
    The helper identifies the internal EFI belonging to the **currently running APFS system**, checks the Mac model/build and existing OpenCore files, backs up the config, then reapplies the same DataHub and normal-boot settings as USB preparation. A fresh OCLP build can otherwise lose those fixes. It does not copy a personal USB EFI, build/install OpenCore, erase data, install packages, root-patch or reboot. If internal OpenCore is absent, it stops with instructions to complete steps 1–2.
+
+   **Its exact changes to the internal `EFI/OC/config.plist` are:**
+
+   | Setting | Result |
+   | :--- | :--- |
+   | `PlatformInfo/DataHub/SystemProductName` | `MacBookPro11,3` |
+   | `PlatformInfo/DataHub/BoardProduct` | `Mac-2BD1B31983FE1663` |
+   | `PlatformInfo/UpdateDataHub` | `true` |
+   | Apple NVRAM `Add` → `boot-args` | Remove the temporary `-x` Safe Boot argument; retain other arguments |
+   | Apple NVRAM `Delete` list | Include `boot-args`, so OpenCore replaces a previously saved value with the configured arguments on the next boot |
+
+   Settings already correct are left unchanged. The original config is backed up before a change, then the written config and referenced boot files are checked again. This carries the model-information fix from the USB workflow into the internal OpenCore configuration.
+
 4. Require `PASS: internal EFI configuration verified`. Shut down, unplug the USB, then start holding **Option**. Select the **internal EFI Boot**, then **Macintosh HD** in OpenCore. Once this works, hold **Control** while selecting the internal EFI entry in Apple's Option picker to make it the default, and test an ordinary restart without the USB.
 
 **Success means a usable desktop after an ordinary restart with the USB disconnected.** The helper verifies files/settings, not firmware startup. Its backup and report are under `build/internal-efi/<timestamp>/`, with a config backup also beside the internal `EFI/OC/config.plist`. `sudo python3 finish_install.py --check` audits the internal settings without changing files; it can mount an unmounted EFI read-only.

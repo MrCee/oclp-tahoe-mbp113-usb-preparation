@@ -1,6 +1,6 @@
 # From a Lilu loop to completed Tahoe setup
 
-**Installation outcome reported by the owner:** Tahoe is working and first-user setup is complete **after erasing the internal drive again and doing a full reinstall from the fully modified USB**. The earlier installation remained unusable despite KDK staging and repair attempts. The final clean reinstall is an essential part of the reported sequence. **Later clarification on 2026-10-17: the new installation works through the USB but does not boot without it. Internal OpenCore handover and a USB-free restart remain unverified.**
+**Installation outcome reported by the owner:** Tahoe is working and first-user setup is complete **after erasing the internal drive again and doing a full reinstall from the fully modified USB**. The earlier installation remained unusable despite KDK staging and repair attempts. The final clean reinstall is an essential part of the reported sequence. **Final boot confirmation on 2026-10-17: the new installation initially required USB OpenCore, then booted without the USB after installing OpenCore internally and running `finish_install.py`.**
 
 This record describes one mid-2014 15-inch **MacBookPro11,3**, with Intel Iris Pro (Haswell) and NVIDIA GeForce GT 750M (Kepler), using **OCLP 3.0.0 RC3** and **Tahoe 26.7.1, build 25G241**. The internal disk had been wiped. The USB supplied the working OpenCore EFI during recovery. No working user session existed when the repair was prepared.
 
@@ -105,9 +105,17 @@ The reported result must therefore include the clean reinstall. It should not be
 
 No post-success performance benchmark, GPU-switching test, sleep/wake qualification or update test has been claimed.
 
+## 9. Final internal EFI handover enabled booting without USB
+
+Removing the USB exposed a separate remaining step: the owner reported that installing OpenCore internally with OCLP brought back the model-information error. A new OCLP build does not automatically inherit the custom USB config edits.
+
+The owner installed the Command Line Tools needed for Git/Python on the MacBook, updated the cloned repo, and ran `sudo python3 finish_install.py` after the internal OpenCore installation. The helper preserves backups, reapplies the three DataHub settings above, removes temporary `-x` from configured boot arguments, and ensures those arguments replace the saved NVRAM value on the next boot. It verifies the internal EFI belonging to the running APFS system rather than assuming a disk number.
+
+The owner then explicitly confirmed that the MacBook worked with the USB disconnected. This final script result is distinct from the earlier experimental Recovery helper: `finish_install.py` corrects the internal boot configuration; it does not install graphics patches or repeat the OS installation. The report supports the combined internal handover on this machine; it does not isolate which individual changed field was decisive.
+
 ## What to reproduce, and what to leave as history
 
-The [README](../README.md) now presents installer-only preparation, clean installation, and internal OpenCore handover. OCLP performs the internal installation; `finish_install.py` then reapplies the same model fixes with config backups. The new helper is fixture-tested; a successful USB-free hardware restart is still pending. The custom Recovery helper is an [optional fallback](RECOVERY.md), selected with `--with-recovery-kit`; it is not built by the default command. The failed Recovery package installation, duplicate mounts, original UUID assumption and repeated attempts to launch tools from the unusable setup screen are history, not additional repairs to repeat.
+The [README](../README.md) now presents installer-only preparation, clean installation, and internal OpenCore handover. OCLP performs the internal installation; `finish_install.py` then reapplies the same model fixes with config backups. The helper has fixture coverage and the owner has confirmed a successful USB-free boot after running it. The custom Recovery helper is an [optional fallback](RECOVERY.md), selected with `--with-recovery-kit`; it is not built by the default command. The failed Recovery package installation, duplicate mounts, original UUID assumption and repeated attempts to launch tools from the unusable setup screen are history, not additional repairs to repeat.
 
 There is no established “wait exactly 30 minutes” requirement. Progress should be judged from logs and a successful user session, not wallpaper or an arbitrary delay.
 
