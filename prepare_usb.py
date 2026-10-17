@@ -13,6 +13,7 @@ import sys
 
 import build_kit as builder
 import fix_efi
+import finish_bundle
 
 REQUIRED = {
     'repair.sh', 'KDK-25G241.tar.gz',
@@ -239,6 +240,7 @@ def audit(usb, partition, config, recovery_kit=False):
     if fix_efi.update_config(original, normal_boot=True) != original:
         raise ValueError('DataHub or normal-boot NVRAM settings still need correction.')
     verify_installer(usb)
+    finish_bundle.verify(usb)
     permissions(usb, recovery_kit=recovery_kit)
     if recovery_kit:
         verify_payloads(usb, partition)
@@ -271,7 +273,7 @@ def main(argv=None):
     fix_efi.update_config(plistlib.loads(config_before), normal_boot=True)
     if args.check:
         audit(usb, partition, config, recovery_kit=args.with_recovery_kit)
-        print('PASS: installer packages, permissions, EFI paths, model and normal boot verified'
+        print('PASS: installer packages, USB finishing tools, permissions, EFI paths, model and normal boot verified'
               + ('; Recovery kit verified.' if args.with_recovery_kit else '.'))
         return
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
@@ -367,6 +369,10 @@ def main(argv=None):
             report['steps'].append('deployed-selected-payloads-with-host-backups')
         assert_same_usb(usb, partition)
         fix_efi.validate_config(usb, config)
+        report['phase'] = 'finishing-tools'
+        log('Bundling the small internal-EFI finishing tools on USB; no MacBook Git clone is needed.')
+        report['finishing_tools'] = finish_bundle.install(usb, run_dir / 'finish-helper-backups')
+        report['steps'].append('bundled-and-verified-internal-efi-finisher')
         report['phase'] = 'efi'
         log('[3/4] Backing up and applying the EFI configuration changes.')
         backup = fix_efi.apply_config(config, normal_boot=True, expected_bytes=config_before)
@@ -384,6 +390,7 @@ def main(argv=None):
         report['efi_after'] = {'SystemProductName': builder.MODEL, 'BoardProduct': fix_efi.BOARD, 'UpdateDataHub': True}
         log('Next: eject the USB and follow the README installation steps.')
         log('After setup, README step 4 installs internal OpenCore and preserves the fixes; keep the USB until a USB-free boot passes.')
+        log('On the MacBook, use MBP113-Finish/finish-install.command on this USB after OCLP installs internal OpenCore.')
         log('This command does not erase the internal disk, install macOS, or guarantee a successful boot.')
     except Exception as exc:
         report['status'] = 'incomplete'

@@ -14,7 +14,7 @@ The public packaging has not been run on a second physical Mac. There are no cla
 
 ## Automated fixture checks
 
-**2026-10-17 result:** all 94 checks passed on the preparation iMac, including 14 new internal-EFI handover checks. Generated test output remains local and ignored.
+**2026-10-17 result:** all 109 checks passed on the preparation iMac, including internal-EFI handover, USB bundling and Command Line Tools bootstrap checks. Generated test output remains local and ignored.
 
 Run on a working macOS development machine:
 
@@ -28,10 +28,11 @@ The script builds and ad-hoc signs the x86_64 native utility, checks the Bash sc
 | :--- | ---: | :--- |
 | Creator, EFI and native utility | 10 | Temporary files; mocked disk metadata; native XML/binary plist and SHA-256 operations |
 | Optional Recovery preparation and EFI discovery | 19 | Disposable USB/EFI fixtures; package building mocked, native deployment hashes executed; no real disks |
-| Default installer-only preparation and boot layout detection | 23 | Package/EFI fixtures and real Python deployment; automatic KDK image acquisition mocked; compiler/extraction prohibited |
+| Default installer-only preparation and boot layout detection | 25 | Package/EFI fixtures and real Python deployment; automatic KDK image acquisition mocked; compiler/extraction prohibited; old-USB finishing bundle upgrade |
 | Preparation prerequisites | 2 | Installer-only mode needs no compiler; optional mode reports absent compiler clearly |
 | Download, copy progress and transfer integrity | 8 | Mocked responses; known/unknown sizes, scrolling bar, speed/ETA, large-file hash/copy progress, preserved copy metadata, truncated/corrupt transfers and interruption cleanup |
 | Internal OpenCore config handover | 14 | Disposable EFI; disk/model/build commands mocked; no physical disk mounted or changed |
+| USB finishing bundle and tools bootstrap | 13 | Bundled module imports, hashes, backups, reuse and symlink guards; fake Apple update/install commands; no real tools installed |
 | Normal-boot startup job | 13 | Disposable filesystem; disk, patcher, power, signature and reboot commands stubbed |
 | Recovery staging | 5 | Disposable System/Data/USB/EFI fixtures; destructive or hardware commands stubbed |
 
@@ -44,6 +45,10 @@ The optional Recovery preparation checks exercise a fresh kit, incomplete kit re
 The default installer-only checks verify that only the two pinned packages and scoped EFI settings are prepared; no Recovery archive, helper or daemon is created. They cover local and downloaded packages, read-only KDK mounting and detachment, repair with backups, repeat runs, audit-only operation, and preservation of old optional kit files. Tests fail if package expansion or compilation is invoked by the installer-only builder. Additional checks cover Apple-only, UEFI and combined boot layouts, genuinely missing or empty bootstraps, symlink rejection, read-only EFI remounting without force, busy mounts, changed EFI identities, cleaned-up write probes, and actionable failure reports before downloads. Fresh missing packages now produce a normal preparation status rather than an exception-looking message, while retaining the detailed reason in the private report. Download tests verify progress formatting and cleanup without accessing the network. The default audit checks packages and EFI, while `--with-recovery-kit --check` also requires the optional kit.
 
 Internal handover checks follow a simulated running APFS system to a physical disk other than `disk0`, verify config backups and scoped fixes, and distinguish configuration PASS from USB-free boot success. They cover repeat runs, audit-only and read-only mounting, wrong host/build/model, external or ambiguous storage, missing/unidentified EFI, absent OpenCore/bootstrap, symlinks, read-only write refusal and changed disk identity. An actual `finish_install.py --check` invocation on the preparation iMac also refused the wrong host before disk discovery or mounting. These checks do not install OCLP, change boot defaults or demonstrate a hardware restart.
+
+The USB now carries the unchanged, owner-tested Python EFI helper together with its dependencies and a Bash launcher. Bundle tests verify that it imports without a repository checkout or third-party Python packages, stays below 200 KB, preserves old files/logs, repairs permissions and rejects corruption/symlinks. Bootstrap fixtures verify numeric Xcode-version selection (including 26.10 versus 26.9), reuse of existing Python, exact stable Command Line Tools selection, exclusion of macOS/beta updates, log creation, discovery/install failures and temporary-marker cleanup without deleting a preexisting marker. Apple update/install commands are replaced with disposable stubs: automatic tools acquisition still needs a fresh MacBook hardware test. Running the real launcher on the preparation iMac refused the wrong host before elevation, downloading or EFI writes.
+
+The eight-file finishing bundle (about 70 KB) was also copied onto the owner's mounted installer USB. The full USB audit then passed: both pinned package hashes, bundled source/manifest/permissions, OpenCore references and model/normal-boot settings. The existing USB EFI config remained byte-for-byte unchanged during that bundle-only upgrade. The launcher has not been used to install developer tools on the MacBook in this new packaging route.
 
 **These fixtures do not invoke OCLP or root-patch the development Mac.** Stubbing signature and disk commands allows testing the orchestration; it does not replace signature verification and real disk validation during actual preparation.
 

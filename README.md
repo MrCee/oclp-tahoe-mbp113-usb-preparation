@@ -6,6 +6,10 @@
 
 **Prepare your USB, install Tahoe, then finish the internal OpenCore setup. One preparation command handles the verified installer packages and model-specific EFI settings.**
 
+> [!IMPORTANT]
+> **Required final step: boot without the USB.**
+> USB preparation alone does not finish the internal boot setup. Complete **[step 4](#4-finish-opencore-on-the-internal-drive)**: install OpenCore to the internal EFI, then run the finishing tool **on the MacBook before rebooting**. Skipping that handover leaves this workflow dependent on USB OpenCore. The finishing tool is now included on the prepared USB; another GitHub clone on the MacBook is unnecessary.
+
 For the **mid-2014 15-inch MacBook Pro, MacBookPro11,3**, with Intel Iris Pro and NVIDIA GT 750M. This unofficial preparation tool supports **Tahoe 26.7.1 / build 25G241 and OCLP 3.0.0 RC3 only**. A different model or installer build stops preparation.
 
 **Owner-confirmed hardware result — 2026-10-17:** Tahoe is installed, user setup is complete, and the MacBook now **boots without the USB after OCLP was installed internally and `finish_install.py` was run**. The final internal-EFI step matters: the completed installation still depended on USB OpenCore before it. This is a reported result on one MacBookPro11,3; keep the prepared USB as a fallback.
@@ -50,6 +54,7 @@ If you already cloned the repo, open that folder and run `git pull --ff-only` in
 - Downloads with a scrolling progress bar, percentage, speed and estimated time, and verifies the pinned official **RC3 `AutoPkg-Assets.pkg`** and matching **`KDK.pkg`**, then copies them into the USB's **`Library/Packages/`**. Correct copies are reused; changed managed files are backed up before replacement.
 - Backs up `config.plist`, sets DataHub `SystemProductName` to `MacBookPro11,3`, `BoardProduct` to `Mac-2BD1B31983FE1663`, and `UpdateDataHub` to `true`.
 - Removes temporary `-x` Safe Boot and ensures OpenCore replaces saved `boot-args`; other boot arguments are retained.
+- Includes the small **`MBP113-Finish/`** folder with the finishing helper, its dependencies, a checksum manifest and **`finish-install.command`**. It is a snapshot of this repo version; rerun preparation to update it.
 - Checks write access before downloading, shows four preparation stages and progress while copying and checking large files, sets package permissions and verifies the result. Logs and reports include the detected layout, backup locations, and the next step if preparation stops.
 
 A missing `Library/Packages` folder on a fresh USB is expected: the command creates it and supplies the packages automatically.
@@ -74,17 +79,21 @@ This is the clean-install sequence used for the reported working result. **Erasi
 
 ## 4. Finish OpenCore on the internal drive
 
-Do this **on the MacBook Pro**, in its installed Tahoe desktop, while booted through the working USB EFI. Keep the USB unchanged as your rescue boot device. This is separate from **Post-Install Root Patch**: root patches do not install the internal bootloader.
+**Required to boot without the USB in this workflow.** Do this **on the MacBook Pro**, in its installed Tahoe desktop, while booted through the working USB EFI. Keep the USB as your rescue boot device. This is separate from **Post-Install Root Patch**: root patches do not install the internal bootloader.
 
 1. Open **OCLP 3.0.0 RC3**, confirm **Target Model → MacBookPro11,3**, then choose **Build and Install OpenCore**.
 2. Install to the **internal physical drive containing Tahoe**, then its **EFI partition**. Identify it by its name, capacity and internal status; do not assume a disk number. If OCLP offers a reboot, **wait until the next step is complete**.
-3. On this MacBook, use a current copy of this repo and **Python 3.9 or newer**. If Git or Python requests Apple's developer tools, run `xcode-select --install`, complete the installation window, then check `python3 --version` and `git --version`. The "install requested" message alone does not mean installation is finished. Python is also available from [python.org](https://www.python.org/downloads/macos/). If you already cloned the repo here, run `git pull --ff-only` in that folder. Otherwise clone it as in step 2 of this guide. From the repo folder run:
+3. On the MacBook, open **`MBP113-Finish` on the prepared USB** and double-click **`finish-install.command`**, or run:
 
    ```bash
-   sudo python3 finish_install.py
+   /bin/bash "/Volumes/Install macOS Tahoe/MBP113-Finish/finish-install.command"
    ```
 
-   The helper identifies the internal EFI belonging to the **currently running APFS system**, checks the Mac model/build and existing OpenCore files, backs up the config, then reapplies the same DataHub and normal-boot settings as USB preparation. A fresh OCLP build can otherwise lose those fixes. It does not copy a personal USB EFI, build/install OpenCore, erase data, install packages, root-patch or reboot. If internal OpenCore is absent, it stops with instructions to complete steps 1–2.
+   Replace the USB name if yours differs. Enter the MacBook administrator password when asked. **No Git or second repository clone is needed on the MacBook.** The launcher uses an existing **Python 3.9+** first. If none works, it automatically checks Apple's `softwareupdate` list, selects the newest stable offered **Command Line Tools for Xcode** by its exact label, and installs only that package with download progress. It then selects the tools directory and checks Python again. It does not select a macOS upgrade. Internet is needed only when tools must be downloaded. The presence of `/usr/bin/python3` alone does not guarantee the Apple developer-tools Python is installed.
+
+   Setup/download output is saved on the USB under **`MBP113-Finish/build/bootstrap/`**. If Apple offers no compatible stable package, the download fails, or Python remains unavailable, the launcher stops before editing internal EFI and gives manual installation options. You can then install tools from [Apple Developer Downloads](https://developer.apple.com/download/all/) or Python from [python.org](https://www.python.org/downloads/macos/) and rerun. A large tools download is unnecessary when a suitable Python already works.
+
+   The bundled helper verifies its files, identifies the internal EFI belonging to the **currently running APFS system**, checks the Mac model/build and existing OpenCore files, backs up the config, then reapplies the same DataHub and normal-boot settings as USB preparation. A fresh OCLP build can otherwise lose those fixes. The EFI helper does not copy a personal USB EFI, build/install OpenCore, erase data, install patch packages, root-patch or reboot. If internal OpenCore is absent, it stops with instructions to complete steps 1–2. The launcher adds prerequisite setup around the same `finish_install.py` used for the owner's successful boot; the new automatic-tools route has fixture tests and awaits a fresh hardware test.
 
    **Its exact changes to the internal `EFI/OC/config.plist` are:**
 
@@ -100,7 +109,9 @@ Do this **on the MacBook Pro**, in its installed Tahoe desktop, while booted thr
 
 4. Require `PASS: internal EFI configuration verified`. Shut down, unplug the USB, then start holding **Option**. Select the **internal EFI Boot**, then **Macintosh HD** in OpenCore. Once this works, hold **Control** while selecting the internal EFI entry in Apple's Option picker to make it the default, and test an ordinary restart without the USB.
 
-**Success means a usable desktop after an ordinary restart with the USB disconnected.** The helper verifies files/settings, not firmware startup. Its backup and report are under `build/internal-efi/<timestamp>/`, with a config backup also beside the internal `EFI/OC/config.plist`. `sudo python3 finish_install.py --check` audits the internal settings without changing files; it can mount an unmounted EFI read-only.
+**Success means a usable desktop after an ordinary restart with the USB disconnected.** The helper verifies files/settings, not firmware startup. Keep the USB writable and connected until it finishes. Its backup and report are under **`MBP113-Finish/build/internal-efi/<timestamp>/` on the USB**, with a config backup also beside the internal `EFI/OC/config.plist`.
+
+Already using a clone on the MacBook? The original route still works: run `git pull --ff-only`, then `sudo python3 finish_install.py` from that folder with Python 3.9+ available. In that route the backup/report stays under the clone's `build/internal-efi/`. Add `--check` to the Python command to audit internal settings without changing files; it can mount an unmounted EFI read-only. Older USBs without `MBP113-Finish` can be upgraded by rerunning the current preparation command on the working Mac; valid packages are reused.
 
 **If it fails:** shut down, reconnect the prepared USB and boot **USB EFI Boot → Macintosh HD**. Keep the error text and helper report. Do not erase the installed OS. If there is no internal EFI entry, recheck OCLP's internal-drive installation. If the Lilu model error returns, recheck the internal config fixes. Rebuilding internal OpenCore later requires rerunning `finish_install.py` before rebooting. A read-only internal EFI must be unmounted normally before a write run; no force-unmount is attempted.
 
@@ -147,5 +158,7 @@ The same checksum checks apply. Use `--cache "/path/on/working-Mac/cache"` for a
 [Official RC3 release](https://github.com/dortania/OpenCore-Legacy-Patcher/releases/tag/3.0.0-rc.3) · [Matching KDK](https://github.com/dortania/KdkSupportPkg/releases/tag/25G241) · [RC3 installer package placement](https://github.com/dortania/OpenCore-Legacy-Patcher/blob/3.0.0-rc.3/opencore_legacy_patcher/wx_gui/gui_macos_installer_flash.py#L443-L481) · [RC3 manual assets guidance](https://discord.com/channels/417165963327176704/1389230559674368062/1557563105897226298)
 
 [OCLP booting without USB](https://dortania.github.io/OpenCore-Legacy-Patcher/POST-INSTALL.html#booting-without-usb-drive) · [OCLP post-install patch guidance](https://dortania.github.io/OpenCore-Legacy-Patcher/POST-INSTALL.html#applying-post-install-volume-patches) · [Testing and limitations](docs/TESTING.md) · [Separate troubleshooting history](docs/CASE-STUDY.md)
+
+[Apple Command Line Tools installation](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools) · [Python on macOS](https://docs.python.org/3/using/mac.html)
 
 OpenCore, OCLP and the actual patches belong to their upstream contributors; the KDK is Apple's work. This repo supplies custom preparation code and documentation, developed with AI assistance. No upstream endorsement is implied. The repo contains source, not installer binaries, personal EFI configs or private logs. See [NOTICE.md](NOTICE.md) and [LICENSE](LICENSE).

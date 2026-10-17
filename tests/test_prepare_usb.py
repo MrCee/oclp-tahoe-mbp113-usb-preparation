@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import build_kit as builder
 import fix_efi
 import prepare_usb as prepare
+import finish_bundle
 
 
 class UsbFixtures:
@@ -137,6 +138,7 @@ class RecoveryKitPreparationTests(UsbFixtures, unittest.TestCase):
 
     def test_audit_only_changes_no_files_or_modes(self):
         self.payload(self.usb)
+        finish_bundle.install(self.usb, self.host / 'fixture-finish-backups')
         self.config.write_bytes(plistlib.dumps(fix_efi.update_config(self.original, True)))
         before = (self.snapshot(self.usb), self.snapshot(self.efi), self.snapshot(self.host))
         self.run_prepare('--check')
@@ -410,6 +412,24 @@ class InstallerOnlyTests(UsbFixtures, unittest.TestCase):
         self.child.assert_not_called()
         self.assertEqual(len(list(self.config.parent.glob('config.before-datahub*'))), 1)
 
+    def test_old_usb_gets_finishing_bundle_without_package_downloads(self):
+        self.packages(self.usb)
+        self.run_prepare()
+        self.child.assert_not_called()
+        finish_bundle.verify(self.usb)
+        report = json.loads(next((self.usb / 'Repair-Logs').rglob('report.json')).read_text())
+        self.assertEqual(report['finishing_tools']['folder'], 'MBP113-Finish')
+        self.assertIn('finish_install.py', report['finishing_tools']['files'])
+
+    def test_audit_rejects_missing_finishing_bundle_without_writes(self):
+        self.packages(self.usb)
+        prepare.permissions(self.usb, repair=True)
+        self.config.write_bytes(plistlib.dumps(fix_efi.update_config(self.original, True)))
+        before = (self.snapshot(self.usb), self.snapshot(self.efi))
+        with self.assertRaises((OSError, ValueError)):
+            self.run_prepare('--check')
+        self.assertEqual(before, (self.snapshot(self.usb), self.snapshot(self.efi)))
+
     def test_default_ignores_and_preserves_old_optional_kit(self):
         kit = self.usb / 'MBP113-Repair'; kit.mkdir()
         (kit / 'common.sh').write_bytes(b'old kit, deliberately not audited')
@@ -423,6 +443,7 @@ class InstallerOnlyTests(UsbFixtures, unittest.TestCase):
 
     def test_default_audit_needs_no_kit_and_writes_nothing(self):
         self.packages(self.usb)
+        finish_bundle.install(self.usb, self.host / 'fixture-finish-backups')
         prepare.permissions(self.usb, repair=True)
         self.config.write_bytes(plistlib.dumps(fix_efi.update_config(self.original, True)))
         before = (self.snapshot(self.usb), self.snapshot(self.efi), self.snapshot(self.host))
